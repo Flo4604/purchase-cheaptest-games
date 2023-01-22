@@ -1,0 +1,30 @@
+{
+    "dependencies": {
+        "@prisma/client": "^4.9.0",
+        "axios": "^1.2.2",
+        "cheerio": "1.0.0-rc.12",
+        "cli-progress": "^3.11.2",
+        "cli-spinners": "^2.7.0",
+        "consola": "^2.15.3",
+        "inquirer": "^9.1.4",
+        "inquirer-number-plus": "^1.0.0",
+        "log-update": "^5.0.1",
+        "qs": "^6.11.0",
+        "steam-user": "^4.26.1",
+        "steamcommunity": "^3.44.3",
+        "steamstore": "^2.2.1",
+        "terminal-image": "^2.0.0"
+    },
+    "type": "module",
+    "devDependencies": {
+        "eslint": "^7.32.0 || ^8.2.0",
+        "eslint-config-airbnb-base": "^15.0.0",
+        "eslint-plugin-import": "^2.25.2",
+        "prisma": "^4.9.0"
+    },
+    "scripts": {
+        "setup": "npx prisma generate && npx prisma db push",
+        "start": "node --experimental-specifier-resolution=node src/index.js",
+        "dbc": "npx prisma format && npx prisma db push && npx prisma generate"
+    }
+}

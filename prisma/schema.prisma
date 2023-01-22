@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./db.sqlite"
+}
+
+model Account {
+  id Int @id @unique @default(autoincrement())
+
+  username   String  @unique
+  password   String
+  oAuthToken String? @default("")
+  steamGuard String? @default("")
+
+  limit       String? @default("0")
+  usage       String? @default("max")
+  maxPrice    Float?  @default(0)
+  optionsFlag Int     @default(0)
+
+  @@index([id])
+}
+
+model App {
+  id Int @id
+
+  name           String
+  subId          Int
+  snr            String
+  originatingSnr String
+  price          Float
+  limited        Boolean @default(false)
+  hasTradingCards        Boolean @default(false)
+
+  @@index([id])
+}
