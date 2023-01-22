@@ -457,7 +457,7 @@ const loadCheapestGames = async (
       maxPrice !== 0
         && (foundApps.filter((app) => app.price > maxPrice).length / foundApps.length) * 100 > 50
     ) {
-      ownedSpinner.fail(`Found ${resultCount} games, but more than 50% of them are over the limit of ${maxPrice} ${wallet.currency}`);
+      logger.warn(`Found ${resultCount} games, but more than 50% of them are over the limit of ${maxPrice} ${wallet.currency}`);
       loop = false;
       return appsToBuy;
     }

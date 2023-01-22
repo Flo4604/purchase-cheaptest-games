@@ -1,7 +1,7 @@
 import axios from 'axios';
 import {
   existsSync,
-  mkdir,
+  mkdirSync,
   writeFileSync,
 } from 'fs';
 import inquirer from 'inquirer';
@@ -60,7 +60,7 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
   });
 
   if (!existsSync('./debug')) {
-    mkdir('./debug');
+    mkdirSync('./debug');
   }
 
   if (account.limit !== undefined && account.usage !== undefined) {
