@@ -9,8 +9,7 @@ import * as cheerio from 'cheerio';
 import qs from 'qs';
 import { writeFileSync } from 'fs';
 import cliProgress from 'cli-progress';
-import cliSpinners from 'cli-spinners';
-import logUpdate from 'log-update';
+import moment from 'moment';
 import {
   getAccounts, storeAccount, updateAccount, updateOAuthToken, updateSteamGuard,
 } from '../db/account';
@@ -375,9 +374,17 @@ const loadCheapestGames = async (
   const appsToBuy = [];
   let loop = true;
 
-  const ownedSpinner = cliSpinners.dots;
-  const { frames: ownedFrames } = ownedSpinner;
-  let ownedFrame = 0;
+  const bar = new cliProgress.SingleBar({
+    stopOnComplete: true,
+    format: 'Loading Games | {bar} | {percentage}% | {value}/{total} that fit the criteria | ETA: {eta}s | Time Elapsed: {duration}s | Total Price {totalPrice} | Average Price {averagePrice}',
+  }, cliProgress.Presets.shades_grey);
+  bar.start(config.limit, 0, {
+    totalPrice: 0,
+    averagePrice: 0,
+    duration: 0,
+  });
+
+  const startTime = moment().valueOf();
 
   while (loop) {
     await sleep(25);
@@ -566,7 +573,11 @@ const loadCheapestGames = async (
     const totalPrice = roundPrice(appsToBuy.reduce((acc, app) => acc + app.price, 0));
     const averagePrice = roundPrice(totalPrice / appsToBuy.length || 0);
 
-    logUpdate(`${ownedFrames[ownedFrame = ++ownedFrame % ownedFrames.length]} We have ${appsToBuy.length} apps to buy in total for a total price of ${totalPrice} ${wallet.currency} | average price of ${averagePrice} ${wallet.currency}`);
+    bar.update(appsToBuy.length, {
+      totalPrice: `${totalPrice} ${wallet.currency}`,
+      averagePrice: `${averagePrice} ${wallet.currency}`,
+      duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
+    });
   }
 
   return appsToBuy;
@@ -851,15 +862,6 @@ const sellItem = async (appId, contextId, assetId, price, amount) => {
   }, {
     Referer: `https://steamcommunity.com/profiles/${steamCommunity.steamID.getSteamID64()}/inventory/`,
   });
-
-  console.log('sell', {
-    sessionid: global.sessionId,
-    appid: appId,
-    contextid: contextId,
-    assetid: assetId,
-    amount,
-    price,
-  }, response);
 };
 
 const getItemPrice = async (appId, marketHashName, currency) => {
@@ -910,8 +912,8 @@ const getCardMarketListings = async () => {
 
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
-    format: 'Loading Sell Orders | {bar} | {percentage}% | {value}/{total} Market Listings | ETA: {eta}s',
-  }, cliProgress.Presets.shades_classic);
+    format: 'Loading Market Listings | {bar} | {percentage}% | {value}/{total} Market Listings',
+  }, cliProgress.Presets.shades_grey);
 
   let firstResponse = false;
   let totalListings = 0;
@@ -991,8 +993,9 @@ const removeOverpricedItems = async (wallet) => {
 
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
-    format: 'Remove Cards | {bar} | {percentage}% | {value}/{total} Market Listings | ETA: {eta}s',
-  }, cliProgress.Presets.shades_classic);
+    format: 'Removing Cards | {bar} | {percentage}% | Checked {value}/{total} Possible Market Listings | Removed {removedCount} Listings | ETA: {eta}s',
+  }, cliProgress.Presets.shades_grey);
+  bar.start(cardsOnMarket.length, 0, { removedCount: 0 });
 
   const cache = {};
   let rateLimitCount = 0;
@@ -1000,15 +1003,17 @@ const removeOverpricedItems = async (wallet) => {
 
   for (let i = 0; i < cardsOnMarket.length; i += 1) {
     let price = 0;
+    bar.update(i + 1, { removedCount });
+
     if (typeof cache[cardsOnMarket[i].hashName] === 'undefined') {
       price = await getItemPrice(753, cardsOnMarket[i].hashName, wallet.currency);
-      await sleep(3500);
+      await sleep(5000);
 
       if (price === -1) {
         rateLimitCount += 1;
-        if (rateLimitCount >= 10) {
-          logger.info('Hit 10 rate limits!, waiting 60 seconds');
-          await sleep(60000);
+        if (rateLimitCount >= 5) {
+          logger.info('Hit 5 rate limits!, waiting 3 minutes');
+          await sleep(3 * 60 * 1000);
           rateLimitCount = 0;
         }
 
@@ -1023,7 +1028,6 @@ const removeOverpricedItems = async (wallet) => {
     if (cardsOnMarket[i].listingPrice > price) {
       removedCount += 1;
       await removeMarketListing(cardsOnMarket[i].listingId);
-      bar.update(removedCount);
     }
   }
 };
@@ -1069,6 +1073,12 @@ const sellCards = async (config, wallet) => {
   const inventoryContent = await getInventory();
   const tradingCards = inventoryContent.filter((item) => item.type.includes('Card') && !item.descriptions.map((d) => d.value).includes('This item can no longer be bought or sold on the Community Market.'));
 
+  const bar = new cliProgress.SingleBar({
+    stopOnComplete: true,
+    format: 'Selling Trading Cards | {bar} | {percentage}% | {value}/{total} Trading Cards | {eta}%s',
+  }, cliProgress.Presets.shades_grey);
+  bar.start(tradingCards.length, 0);
+
   let totalPrice = 0;
   const priceCache = {};
 
@@ -1082,7 +1092,6 @@ const sellCards = async (config, wallet) => {
       await sleep(3500);
 
       if (price === -1) {
-        logger.error(`Could not find price for ${card.market_hash_name}`);
         // eslint-disable-next-line no-continue
         continue;
       }
@@ -1100,6 +1109,7 @@ const sellCards = async (config, wallet) => {
     totalPrice += quickSellPrice * cards.length;
 
     await sellItem(card.appid, card.contextid, card.assetid, quickSellPrice, cards.length);
+    bar.update(i + 1);
     logger.log(`Sell ${cards.length} ${card.market_hash_name} for ${(quickSellPrice / 100).toFixed(2)} `);
     logger.log(`Total price: ${(totalPrice / 100.0).toFixed(2)} ${wallet.currency}`);
   }

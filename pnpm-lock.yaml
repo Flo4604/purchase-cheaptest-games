@@ -5,14 +5,13 @@ specifiers:
   axios: ^1.2.2
   cheerio: 1.0.0-rc.12
   cli-progress: ^3.11.2
-  cli-spinners: ^2.7.0
   consola: ^2.15.3
   eslint: ^7.32.0 || ^8.2.0
   eslint-config-airbnb-base: ^15.0.0
   eslint-plugin-import: ^2.25.2
   inquirer: ^9.1.4
   inquirer-number-plus: ^1.0.0
-  log-update: ^5.0.1
+  moment: ^2.29.4
   prisma: ^4.9.0
   qs: ^6.11.0
   steam-user: ^4.26.1
@@ -25,11 +24,10 @@ dependencies:
   axios: 1.2.2
   cheerio: 1.0.0-rc.12
   cli-progress: 3.11.2
-  cli-spinners: 2.7.0
   consola: 2.15.3
   inquirer: 9.1.4
   inquirer-number-plus: 1.0.0
-  log-update: 5.0.1
+  moment: 2.29.4
   qs: 6.11.0
   steam-user: 4.26.1
   steamcommunity: 3.44.3
@@ -2369,11 +2367,6 @@ packages:
     engines: {node: '>=8'}
     dev: false
 
-  /is-fullwidth-code-point/4.0.0:
-    resolution: {integrity: sha512-O4L094N2/dZ7xqVdrXhh9r1KODPJpFms8B5sGdJLPy664AgvXsreZUyCQQNItZRDlYug4xStLjNp/sz3HvBowQ==}
-    engines: {node: '>=12'}
-    dev: false
-
   /is-function/1.0.2:
     resolution: {integrity: sha512-lw7DUp0aWXYg+CBCN+JKkcE0Q2RayZnSvnZBlwgxHBQhqt5pZNVy4Ri7H9GmmXkdu7LUthszM+Tor1u/2iBcpQ==}
     dev: false
@@ -2656,17 +2649,6 @@ packages:
       wrap-ansi: 6.2.0
     dev: false
 
-  /log-update/5.0.1:
-    resolution: {integrity: sha512-5UtUDQ/6edw4ofyljDNcOVJQ4c7OjDro4h3y8e1GQL5iYElYclVHJ3zeWchylvMaKnDbDilC8irOVyexnA/Slw==}
-    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
-    dependencies:
-      ansi-escapes: 5.0.0
-      cli-cursor: 4.0.0
-      slice-ansi: 5.0.0
-      strip-ansi: 7.0.1
-      wrap-ansi: 8.0.1
-    dev: false
-
   /long/3.2.0:
     resolution: {integrity: sha512-ZYvPPOMqUwPoDsbJaR10iQJYnMuZhRTvHYl62ErLIEX7RgFlziSBUUvrt3OVfc47QlHHpzPZYP17g3Fv7oeJkg==}
     engines: {node: '>=0.6'}
@@ -2733,6 +2715,10 @@ packages:
     hasBin: true
     dependencies:
       minimist: 1.2.7
+    dev: false
+
+  /moment/2.29.4:
+    resolution: {integrity: sha512-5LC9SOxjSc2HF6vO2CyuTDNivEdoz2IvyJJGj6X8DJ0eFyfszE0QiEd+iXmBvUP3WHxSjFH/vIsA0EN00cgr8w==}
     dev: false
 
   /ms/2.0.0:
@@ -3247,14 +3233,6 @@ packages:
       ansi-styles: 4.3.0
       astral-regex: 2.0.0
       is-fullwidth-code-point: 3.0.0
-    dev: false
-
-  /slice-ansi/5.0.0:
-    resolution: {integrity: sha512-FC+lgizVPfie0kkhqUScwRu1O/lF6NOgJmlCgK+/LYxDCTk8sGelYaHDhFcDN+Sn3Cv+3VSa4Byeo+IMCzpMgQ==}
-    engines: {node: '>=12'}
-    dependencies:
-      ansi-styles: 6.2.1
-      is-fullwidth-code-point: 4.0.0
     dev: false
 
   /smart-buffer/4.2.0:
