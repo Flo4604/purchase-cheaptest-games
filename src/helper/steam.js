@@ -14,23 +14,32 @@ import logUpdate from 'log-update';
 import {
   getAccounts, storeAccount, updateAccount, updateOAuthToken, updateSteamGuard,
 } from '../db/account';
-import { addApp, getApp, updateGame } from '../db/games';
+import {
+  addApp, getApp, getLimitedGames, updateGame,
+} from '../db/games';
 import logger from './logger';
-import { asyncFilter, roundPrice, sleep } from './util';
-import { EXTRA_OPTIONS } from './constants';
+import {
+  asyncFilter, roundPrice, sleep, toCents,
+} from './util';
+import {
+  COUNTRY_CODES, CURRENCY_CODES, EXTRA_OPTIONS, MAX_PRICES,
+} from './constants';
+import { showGamesToBuy } from './config';
 
 const steamCommunity = new Steamcommunity();
 const steamStore = new SteamStore();
 
 // [HTTP REQUESTS]
 
-const postRequest = async (url, data) => new Promise(async (resolve) => {
+const postRequest = async (url, data, headers = {}) => new Promise(async (resolve) => {
   steamCommunity.httpRequestPost(url, {
     form: data,
+    headers,
   }, (err, response, body) => {
     if (err) {
-      logger.error(err);
-      return;
+      logger.info(body);
+      logger.warn(err.message);
+      resolve(false);
     }
 
     resolve(body);
@@ -40,8 +49,8 @@ const postRequest = async (url, data) => new Promise(async (resolve) => {
 const getRequest = async (url) => new Promise(async (resolve) => {
   steamCommunity.httpRequestGet(url, (err, response, body) => {
     if (err) {
-      logger.error(err);
-      return;
+      logger.warn(err.message);
+      resolve(false);
     }
     resolve(body);
   });
@@ -54,6 +63,19 @@ const responseToJSON = (response) => {
     logger.error(e);
     return false;
   }
+};
+
+const balanceToAmount = (string) => {
+  const currency = string.match(/([A-Z]{1,})/)[0];
+  const amount = string.match(/(\d+(?:.(\d+)){1,})/)[0];
+
+  // write a function that can detect the currency and convert it to a number
+  const parsedAmount = parseFloat(amount.replace(/,/g, '').replace(/\./, '')) / 100;
+
+  return {
+    currency,
+    amount: parsedAmount,
+  };
 };
 
 // [ Login stuff ]
@@ -229,13 +251,9 @@ const getWalletBalance = async () => new Promise(async (resolve) => {
   steamStore.getWalletBalance((err, response) => {
     if (err) {
       logger.log(err);
-      return;
     }
-    // split the balance into currency and amount
-    const [amount, currency] = response.formattedBalance.split(' ');
 
-    // write a function that can detect the currency and convert it to a number
-    const parsedAmount = parseFloat(amount.replace(/,/g, '').replace(/\./, '')) / 100;
+    const { amount, currency } = balanceToAmount(response.formattedBalance);
 
     // check if the user has a wallet
     const hasWallet = !!currency && !!amount;
@@ -243,7 +261,7 @@ const getWalletBalance = async () => new Promise(async (resolve) => {
     resolve({
       hasWallet,
       currency,
-      balance: parsedAmount,
+      balance: amount,
     });
   });
 });
@@ -289,7 +307,7 @@ const bypassMaturityCheck = async (appId, appPage) => {
 };
 
 async function getAppDetails(app, forceUrl = false) {
-  const { appId } = app;
+  const { appId, isBundle = false, includedApps = [] } = app;
 
   const appInDb = await getApp(appId);
 
@@ -327,6 +345,8 @@ async function getAppDetails(app, forceUrl = false) {
   app.id = appId;
   app.limited = isLimited;
   app.hasTradingCards = hasTradingCards;
+  app.isBundle = isBundle;
+  app.includedApps = includedApps;
 
   if (!app.subId) {
     logger.log(`No subId found for app ${appId}`);
@@ -360,13 +380,13 @@ const loadCheapestGames = async (
   let ownedFrame = 0;
 
   while (loop) {
-    await sleep(50);
+    await sleep(25);
     const data = {
       start,
       count,
       dynamic_data: '',
       sort_by: 'Price_ASC',
-      maxprice: '120',
+      maxprice: MAX_PRICES[wallet.currency],
       category1: '998',
       hidef2p: '1',
       ndl: '1',
@@ -424,6 +444,8 @@ const loadCheapestGames = async (
           price,
           url: appUrl,
           appId: subId,
+          isSub: true,
+          appsInPackage: appId.split(','),
         };
       }
 
@@ -438,6 +460,7 @@ const loadCheapestGames = async (
         price,
         url: appUrl,
         appId,
+        isSub: false,
       };
     }).get());
 
@@ -446,9 +469,6 @@ const loadCheapestGames = async (
 
     // filter out empty arrays
     foundApps = foundApps.filter((app) => app);
-
-    // remove apps from the foundApps array if they are already owned or limited
-    foundApps = foundApps.filter((app) => !ownedApps.includes(Number(app.appId)));
 
     const resultCount = foundApps.length;
 
@@ -472,6 +492,12 @@ const loadCheapestGames = async (
         return false;
       }
 
+      // check if the app is owned
+
+      if (ownedApps.includes(app.id) || ownedApps.includes(app.subId)) {
+        return false;
+      }
+
       // check if the app is limited and we do not have the TRADING_CARDS_LIMITED option set
       // eslint-disable-next-line no-bitwise
       if (app.limited && !(optionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED)) {
@@ -485,6 +511,8 @@ const loadCheapestGames = async (
       if (appsToBuy.find((appToBuy) => appToBuy.appId === app.id)) {
         return false;
       }
+
+      //   if(app.)
 
       // eslint-disable-next-line no-bitwise
       if ((optionsFlag & EXTRA_OPTIONS.TRADING_CARDS
@@ -504,37 +532,28 @@ const loadCheapestGames = async (
 
       const currentPriceOfAllApps = appsToBuy.reduce((acc, appToBuy) => acc + appToBuy.price, 0);
 
-      switch (usage) {
-        case 'max':
-          if (currentPriceOfAllApps + app.price >= wallet.balance) {
-            logger.info(`The current price of all apps (${roundPrice(currentPriceOfAllApps)} ${wallet.currency}) plus the price of the next app (${app.price} ${wallet.currency}) is higher than the balance (${wallet.balance} ${wallet.currency})`);
-            loop = false;
-          }
-          break;
-        case 'balance':
-          if (currentPriceOfAllApps + app.price >= limit) {
-            logger.info(`The current price of all apps (${currentPriceOfAllApps} ${wallet.currency}) plus the price of the next app (${app.price} ${wallet.currency}) is higher than the limit (${limit} ${wallet.currency})`);
-            loop = false;
-          }
-          break;
-        case 'amount':
-          if (appsToBuy.length >= limit) {
-            logger.info(`The current amount of apps (${appsToBuy.length}) is higher than the limit (${limit})`);
-            loop = false;
-          }
-          // this exact game fits
-          if (appsToBuy.length + 1 >= limit) {
-            appsToBuy.push(app);
-            loop = false;
-          }
-          break;
-        case 'preview':
-          if (appsToBuy.length + realOwnedAppCount >= limit) {
-            logger.info(`The current amount of apps (${appsToBuy.length + realOwnedAppCount}) is higher than the limit (${limit})`);
-            loop = false;
-          }
-          break;
-        default:
+      if (['max'].includes(usage) && currentPriceOfAllApps + app.price >= wallet.balance) {
+        logger.info(`The current price of all apps (${roundPrice(currentPriceOfAllApps)} ${wallet.currency}) plus the price of the next app (${app.price} ${wallet.currency}) is higher than the balance (${wallet.balance} ${wallet.currency})`);
+        loop = false;
+        break;
+      }
+      if (['balance'].includes(usage) && currentPriceOfAllApps + app.price >= limit) {
+        logger.info(`The current price of all apps (${currentPriceOfAllApps} ${wallet.currency}) plus the price of the next app (${app.price} ${wallet.currency}) is higher than the limit (${limit} ${wallet.currency})`);
+        loop = false;
+        break;
+      }
+      if (['amount', 'next'].includes(usage) && appsToBuy.length >= limit) {
+        logger.info(`The current amount of apps (${appsToBuy.length}) is higher than the limit (${limit})`);
+        loop = false;
+        if (appsToBuy.length + 1 <= limit) {
+          appsToBuy.push(app);
+          loop = false;
+        }
+        break;
+      }
+      if (['preview'].includes(usage) && appsToBuy.length + realOwnedAppCount >= limit) {
+        logger.info(`The current amount of apps (${appsToBuy.length + realOwnedAppCount}) is higher than the limit (${limit})`);
+        loop = false;
       }
 
       if (!loop) break;
@@ -559,7 +578,7 @@ const addGamesToCart = async (apps) => {
     format: 'Adding games to cart | {bar} | {percentage}% | {value}/{total} Games | ETA: {eta}s',
   }, cliProgress.Presets.shades_grey);
 
-  bar.start(apps.length, 0);
+  bar.start(apps.length, 1);
 
   for (let i = 0; i < apps.length; i += 1) {
     const app = apps[i];
@@ -570,8 +589,6 @@ const addGamesToCart = async (apps) => {
       originating_snr: app.originatingSnr,
       action: 'add_to_cart',
     });
-
-    await sleep(50);
 
     if (response.match(/Your item has been added!/) === null) {
       logger.error(`Error adding app ${app.name} (${app.appId}) to cart`);
@@ -729,6 +746,8 @@ const initializeTransaction = async (countryCode, cartPage) => {
     logger.error('initializeTransaction() Error initializing transaction', response);
   }
 
+  logger.log(`initializeTransaction() response: ${JSON.stringify(response)}`);
+
   if (response?.appcausingerror) {
     logger.error('initializeTransaction() Error initializing transaction', response.specificerrortext);
     await removeFromCart(response, cartPage);
@@ -785,7 +804,7 @@ const checkoutCart = async () => {
 
   await finalizeTransaction(transactionId);
 
-  logger.log('checkoutCart() Successfully checked out; exiting');
+  logger.log('checkoutCart() Successfully checked out');
 };
 
 const setGamePreferences = async () => {
@@ -821,6 +840,271 @@ const getOwnedAppsCount = async () => {
   return Number($('.badge_description')?.text()?.replace(/[^0-9]/g, '') ?? 9);
 };
 
+const sellItem = async (appId, contextId, assetId, price, amount) => {
+  const response = await postRequest('https://steamcommunity.com/market/sellitem/', {
+    sessionid: global.sessionId,
+    appid: appId,
+    contextid: contextId,
+    assetid: assetId,
+    amount,
+    price,
+  }, {
+    Referer: `https://steamcommunity.com/profiles/${steamCommunity.steamID.getSteamID64()}/inventory/`,
+  });
+
+  console.log('sell', {
+    sessionid: global.sessionId,
+    appid: appId,
+    contextid: contextId,
+    assetid: assetId,
+    amount,
+    price,
+  }, response);
+};
+
+const getItemPrice = async (appId, marketHashName, currency) => {
+  const url = new URL('https://steamcommunity.com/market/priceoverview/');
+  url.searchParams.append('country', COUNTRY_CODES[currency]);
+  url.searchParams.append('currency', CURRENCY_CODES[currency]);
+  url.searchParams.append('appid', appId);
+  url.searchParams.append('market_hash_name', marketHashName);
+
+  const response = responseToJSON(await getRequest(url.href).catch(() => ({ })));
+
+  let price = -1;
+
+  if (typeof response?.success !== 'undefined') {
+    if (!response?.lowest_price) {
+      logger.warn(`Could not get price for ${marketHashName} in ${currency}`, response);
+    }
+
+    price = balanceToAmount(response.lowest_price).amount;
+  }
+
+  return price;
+};
+
+const getInventory = () => new Promise((resolve, reject) => {
+  steamCommunity.getUserInventoryContents(
+    steamCommunity.steamID,
+    753,
+    6,
+    true,
+    (err, inventory, totalCount) => {
+      if (err) {
+        reject(err);
+      }
+
+      resolve(inventory);
+    },
+  );
+});
+
+const getCardMarketListings = async () => {
+  let loop = true;
+
+  let start = 0;
+  const maxCount = 100;
+
+  const tradingCards = [];
+
+  const bar = new cliProgress.SingleBar({
+    stopOnComplete: true,
+    format: 'Loading Sell Orders | {bar} | {percentage}% | {value}/{total} Market Listings | ETA: {eta}s',
+  }, cliProgress.Presets.shades_classic);
+
+  let firstResponse = false;
+  let totalListings = 0;
+
+  while (loop) {
+    const response = responseToJSON(await getRequest(`https://steamcommunity.com/market/mylistings/render/?query=&start=${start}&count=${maxCount}`));
+
+    if (response.success) {
+      if (!firstResponse) {
+        bar.start(response.total_count, 0);
+        firstResponse = true;
+        totalListings = response.total_count;
+      }
+
+      const $ = cheerio.load(response.results_html);
+
+      const listings = $('.market_listing_row.market_recent_listing_row');
+
+      listings.each((_, listing) => {
+        const listingId = $(listing).attr('id').replace('mylisting_', '');
+        const listingName = $(listing).find('.market_listing_game_name').text();
+        const listingPrice = balanceToAmount($(listing).find('.market_listing_price').text()).amount;
+        const hashName = `${$(listing).find('.market_listing_item_name_link').attr('href').split('-')[0].split('/')[6]}-${$(listing).find('.market_listing_item_name_link').text()}`;
+
+        if (listingName.includes('Card') || listingName.includes('card')) {
+          tradingCards.push({
+            listingId,
+            listingName,
+            listingPrice,
+            hashName,
+          });
+
+          bar.update(tradingCards.length);
+        }
+
+        // get the id before the - for example: https://steamcommunity.com/market/listings/753/1109360-Taeko%20Witch%20%28Foil%29
+        // the id is 1109360 and remove the name
+      });
+
+      if (response.start + response.pagesize >= totalListings) {
+        loop = false;
+      } else {
+        start += maxCount;
+      }
+    } else {
+      logger.error('getCardMarketListings() Error getting card market listings', response);
+      loop = false;
+    }
+
+    await sleep(100);
+  }
+
+  bar.stop();
+
+  return tradingCards;
+};
+
+const removeMarketListing = async (listingId) => {
+  const response = responseToJSON(
+    await postRequest(`https://steamcommunity.com/market/removelisting/${listingId}`, {
+      sessionid: global.sessionId,
+    }, {
+      Referer: 'https://steamcommunity.com/market/',
+    }),
+  );
+
+  if (!response) {
+    logger.error('removeMarketListing() Error removing listing');
+    return false;
+  }
+
+  return true;
+};
+
+const removeOverpricedItems = async (wallet) => {
+  const cardsOnMarket = await getCardMarketListings();
+
+  const bar = new cliProgress.SingleBar({
+    stopOnComplete: true,
+    format: 'Remove Cards | {bar} | {percentage}% | {value}/{total} Market Listings | ETA: {eta}s',
+  }, cliProgress.Presets.shades_classic);
+
+  const cache = {};
+  let rateLimitCount = 0;
+  let removedCount = 0;
+
+  for (let i = 0; i < cardsOnMarket.length; i += 1) {
+    let price = 0;
+    if (typeof cache[cardsOnMarket[i].hashName] === 'undefined') {
+      price = await getItemPrice(753, cardsOnMarket[i].hashName, wallet.currency);
+      await sleep(3500);
+
+      if (price === -1) {
+        rateLimitCount += 1;
+        if (rateLimitCount >= 10) {
+          logger.info('Hit 10 rate limits!, waiting 60 seconds');
+          await sleep(60000);
+          rateLimitCount = 0;
+        }
+
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      cache[cardsOnMarket[i].hashName] = price;
+    } else {
+      price = cache[cardsOnMarket[i].hashName];
+    }
+
+    if (cardsOnMarket[i].listingPrice > price) {
+      removedCount += 1;
+      await removeMarketListing(cardsOnMarket[i].listingId);
+      bar.update(removedCount);
+    }
+  }
+};
+
+const buyGames = async (config, ownedApps, ownedAppsRealCount, wallet) => {
+  const appList = await showGamesToBuy(await loadCheapestGames(
+    config,
+    0,
+    100,
+    ownedApps,
+    ownedAppsRealCount,
+    wallet,
+    await getLimitedGames(),
+  ), wallet);
+
+  if (config.usage !== 'preview') {
+  // split into chunks of 150
+    const chunks = [];
+
+    const minChunkSize = 200;
+    const expectedChunkSize = appList.length / ((appList.length * 2) / 100);
+    const chunkSize = expectedChunkSize < minChunkSize ? minChunkSize : expectedChunkSize;
+
+    for (let i = 0; i < appList.length; i += chunkSize) {
+      chunks.push(appList.slice(i, i + chunkSize));
+    }
+
+    for (let i = 0; i < chunks.length; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await addGamesToCart(chunks[i]);
+
+      await checkoutCart();
+
+      await sleep(60);
+    }
+
+    await addGamesToCart(appList);
+    await checkoutCart();
+  }
+};
+
+const sellCards = async (config, wallet) => {
+  const inventoryContent = await getInventory();
+  const tradingCards = inventoryContent.filter((item) => item.type.includes('Card') && !item.descriptions.map((d) => d.value).includes('This item can no longer be bought or sold on the Community Market.'));
+
+  let totalPrice = 0;
+  const priceCache = {};
+
+  for (let i = 0; i < tradingCards.length; i += 1) {
+    const card = tradingCards[i];
+
+    let price = 0;
+
+    if (typeof priceCache[card.market_hash_name] === 'undefined') {
+      price = await getItemPrice(card.appid, card.market_hash_name, wallet.currency);
+      await sleep(3500);
+
+      if (price === -1) {
+        logger.error(`Could not find price for ${card.market_hash_name}`);
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+
+      priceCache[card.market_hash_name] = price;
+    } else {
+      price = priceCache[card.market_hash_name];
+    }
+
+    const cards = tradingCards.filter((c) => c.market_hash_name === card.market_hash_name);
+
+    // do price - 0.01 and decrease by 13 % and convert to cents
+    const quickSellPrice = toCents((price - 0.01).toFixed(2) * 0.87 * 100);
+
+    totalPrice += quickSellPrice * cards.length;
+
+    await sellItem(card.appid, card.contextid, card.assetid, quickSellPrice, cards.length);
+    logger.log(`Sell ${cards.length} ${card.market_hash_name} for ${(quickSellPrice / 100).toFixed(2)} `);
+    logger.log(`Total price: ${(totalPrice / 100.0).toFixed(2)} ${wallet.currency}`);
+  }
+};
+
 export {
   doLogin,
   chooseAccount,
@@ -834,4 +1118,12 @@ export {
   checkoutCart,
   addGamesToCart,
   getOwnedAppsCount,
+  getItemPrice,
+  sellItem,
+  getInventory,
+  getCardMarketListings,
+  removeMarketListing,
+  removeOverpricedItems,
+  sellCards,
+  buyGames,
 };

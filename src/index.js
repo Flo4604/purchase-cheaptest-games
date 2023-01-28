@@ -2,17 +2,16 @@
 import terminalImage from 'terminal-image';
 import {
   addAccount,
-  addGamesToCart,
   BADGES as badges,
-  checkoutCart,
+  buyGames,
   chooseAccount,
   doLogin,
   getOwnedApps,
   getOwnedAppsCount,
   getWalletBalance,
-  loadCheapestGames,
+  removeOverpricedItems,
+  sellCards,
   setupConfig,
-  showGamesToBuy,
 } from './helper';
 import { getAccount } from './db/account';
 import logger from './helper/logger';
@@ -45,20 +44,12 @@ const wallet = await getWalletBalance();
 
 const config = await setupConfig(account, wallet, ownedAppsRealCount);
 
-const appList = await showGamesToBuy(await loadCheapestGames(
-  config,
-  0,
-  100,
-  ownedApps,
-  ownedAppsRealCount,
-  wallet,
-  await getLimitedGames(),
-), wallet);
-
-if (config.usage !== 'preview') {
-  await addGamesToCart(appList);
-
-  await checkoutCart();
+if (config.mode === 'cleanup') {
+  await removeOverpricedItems(wallet);
+} else if (config.mode === 'sell') {
+  await sellCards(config, wallet);
+} else if (config.mode === 'buy') {
+  await buyGames(config, ownedApps, ownedAppsRealCount, wallet);
 }
 
 logger.log('Thanks for using this script!');

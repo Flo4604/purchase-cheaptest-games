@@ -4,7 +4,16 @@ const prisma = new PrismaClient();
 
 const addApp = async (app) => {
   const {
-    name, originatingSnr, snr, subId, appId: id, price, limited, hasTradingCards,
+    name,
+    originatingSnr,
+    snr,
+    subId,
+    appId: id,
+    price,
+    limited,
+    hasTradingCards,
+    isBundle,
+    includedApps,
   } = app;
 
   try {
@@ -17,6 +26,8 @@ const addApp = async (app) => {
         price: Number(price),
         id: Number(id),
         hasTradingCards,
+        isBundle,
+        includedApps,
         limited,
       },
       update: {
@@ -28,6 +39,8 @@ const addApp = async (app) => {
         id: Number(id),
         limited,
         hasTradingCards,
+        includedApps,
+        isBundle,
       },
       where: { id: Number(id) },
     });

@@ -1,3 +1,4 @@
+/* eslint-disable no-bitwise */
 const HIGHEST_GAME_BADGE = 32;
 
 const EXTRA_OPTIONS = {
@@ -5,10 +6,26 @@ const EXTRA_OPTIONS = {
   TRADING_CARDS_LIMITED: 1 << 1,
 };
 
+const MAX_PRICES = {
+  ARS: 840,
+  TL: 60,
+};
+
+const CURRENCY_CODES = {
+  ARS: 34,
+  TL: 17,
+};
+
+const COUNTRY_CODES = {
+  ARS: 'AR',
+  TL: 'TR',
+};
+
 const BADGES = [1, 5, 10, 25, 50, 100, 250, 500, 1000];
 
 const TRANSLATION = {
   amount: 'Buy certain amount of games',
+  next: 'Buy until the next badge',
   max: 'Buy games until the wallet is empty',
   money: 'Buy games for a certain amount of money',
   preview: 'Preview how much money it would cost for a certain badge',
@@ -21,4 +38,7 @@ export {
   HIGHEST_GAME_BADGE,
   BADGES,
   TRANSLATION,
+  MAX_PRICES,
+  CURRENCY_CODES,
+  COUNTRY_CODES,
 };

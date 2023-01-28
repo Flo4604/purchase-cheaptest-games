@@ -42,61 +42,20 @@ const getExtraOptions = (optionsFlag) => {
   return options;
 };
 
-const setupConfig = async (account, wallet, ownedGameCount) => {
-  for (let i = 2; i < HIGHEST_GAME_BADGE; i += 1) {
-    BADGES.push(i * 1000);
-  }
+const sellChoices = (account, wallet) => {
+  const choices = [
+    {
+      name: 'Sell all trading cards',
+      value: 'all',
+    },
+  ];
 
-  BADGES.forEach(async (badge) => {
-    if (!existsSync(`${directoryName}/../../assets/badge_${badge}.png`)) {
-      writeFileSync(
-        `./assets/badge_${badge}.png`,
-        await axios.get(
-          `https://community.cloudflare.steamstatic.com/public/images/badges/13_gamecollector/${badge}_54.png?v=4`,
-          { responseType: 'arraybuffer' },
-        ).then((response) => response.data),
-      );
-    }
-  });
+  return {
+    mode: 'sell',
+  };
+};
 
-  if (!existsSync('./debug')) {
-    mkdirSync('./debug');
-  }
-
-  if (account.limit !== undefined && account.usage !== undefined) {
-    const answers = await inquirer.prompt([
-      {
-        type: 'list',
-        message: 'Would you like to continue with the old config or change it?',
-        name: 'usage',
-        choices: [
-          {
-            name: `Continue with old config:
-            Limit:${account.limit === '0' ? '∞' : account.limit}
-            Usage: ${TRANSLATION[account.usage]}
-            Max Price: ${account.maxPrice === 0 ? 'No limit' : `${account.maxPrice} ${wallet.currency}`}
-            Extra options: ${getExtraOptions(account.optionsFlag).join('|')}`,
-            value: 'continue',
-            checked: true,
-          },
-          {
-            name: 'Edit config',
-            value: 'edit',
-          },
-        ],
-      },
-    ]);
-
-    if (answers.usage === 'continue') {
-      return {
-        limit: account.limit,
-        usage: account.usage,
-        maxPrice: account.maxPrice,
-        optionsFlag: account.optionsFlag,
-      };
-    }
-  }
-
+const buyChoices = async (account, wallet, ownedGameCount) => {
   const answers = await inquirer.prompt([
     {
       type: 'list',
@@ -119,6 +78,10 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
         {
           name: 'Preview how much money it would cost for a certain badge',
           value: 'preview',
+        },
+        {
+          name: 'Buy until the next badge',
+          value: 'next',
         },
       ],
     },
@@ -162,6 +125,9 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
     ]);
 
     limit = answer.badge;
+  } else if (answers.usage === 'next') {
+    logger.info(`You currently own ${ownedGameCount} games and the next badge is at ${BADGES.find((i) => i >= ownedGameCount)} games. `);
+    limit = BADGES.find((i) => i >= ownedGameCount) - ownedGameCount;
   } else {
     limit = 0;
   }
@@ -195,11 +161,103 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
   }
 
   return {
+    mode: 'buy',
     usage: answers.usage,
     limit,
     maxPrice: maxPrice.maxPrice,
     optionsFlag,
   };
+};
+
+const setupConfig = async (account, wallet, ownedGameCount) => {
+  for (let i = 2; i < HIGHEST_GAME_BADGE; i += 1) {
+    BADGES.push(i * 1000);
+  }
+
+  BADGES.forEach(async (badge) => {
+    if (!existsSync(`${directoryName}/../../assets/badge_${badge}.png`)) {
+      writeFileSync(
+        `./assets/badge_${badge}.png`,
+        await axios.get(
+          `https://community.cloudflare.steamstatic.com/public/images/badges/13_gamecollector/${badge}_54.png?v=4`,
+          { responseType: 'arraybuffer' },
+        ).then((response) => response.data),
+      );
+    }
+  });
+
+  if (!existsSync('./debug')) {
+    mkdirSync('./debug');
+  }
+
+  if (account.limit !== undefined && account.usage !== undefined) {
+    // const text =
+    const answers = await inquirer.prompt([
+      {
+        type: 'list',
+        message: 'Would you like to continue with the old config or change it?',
+        name: 'usage',
+        choices: [
+          {
+            name: `Continue with old config:
+            Limit: ${account.limit === '0' ? '∞' : account.limit}
+            Usage: ${TRANSLATION[account.usage]}
+            Max Price: ${account.maxPrice === 0 ? 'No limit' : `${account.maxPrice} ${wallet.currency}`}
+            Extra options: ${getExtraOptions(account.optionsFlag).join('|')}`,
+            value: 'continue',
+            checked: true,
+          },
+          {
+            name: 'Edit config',
+            value: 'edit',
+          },
+        ],
+      },
+    ]);
+
+    if (answers.usage === 'continue') {
+      return {
+        limit: account.limit,
+        usage: account.usage,
+        maxPrice: account.maxPrice,
+        optionsFlag: account.optionsFlag,
+      };
+    }
+  }
+
+  const answers = await inquirer.prompt([
+    {
+      type: 'list',
+      message: 'What do you want to do?',
+      name: 'usage',
+      choices: [
+        {
+          name: 'Buy games',
+          value: 'buy',
+          checked: true,
+        },
+        {
+          name: 'Sell Trading Cards',
+          value: 'sell',
+        },
+        {
+          name: 'Clean up Trading Card Listings',
+          value: 'cleanup',
+        },
+      ],
+    },
+  ]);
+
+  if (answers.usage === 'sell') {
+    return sellChoices(account, wallet);
+  }
+  if (answers.usage === 'cleanup') {
+    return {
+      mode: 'cleanup',
+    };
+  }
+
+  return buyChoices(account, wallet, ownedGameCount);
 };
 
 const showGamesToBuy = async (games, wallet) => {

@@ -15,10 +15,11 @@ model Account {
   oAuthToken String? @default("")
   steamGuard String? @default("")
 
-  limit       String? @default("0")
-  usage       String? @default("max")
-  maxPrice    Float?  @default(0)
-  optionsFlag Int     @default(0)
+  limit       String @default("0")
+  usage       String @default("max")
+  maxPrice    Float  @default(0)
+  optionsFlag Int    @default(0)
+  mode        String @default("buy")
 
   @@index([id])
 }
@@ -26,13 +27,26 @@ model Account {
 model App {
   id Int @id
 
-  name           String
-  subId          Int
-  snr            String
-  originatingSnr String
-  price          Float
-  limited        Boolean @default(false)
-  hasTradingCards        Boolean @default(false)
+  name            String
+  subId           Int
+  snr             String
+  originatingSnr  String
+  price           Float
+  limited         Boolean     @default(false)
+  hasTradingCards Boolean     @default(false)
+  isBundle        Boolean     @default(false)
+  includedApps    BundleApp[]
+
+  @@index([id])
+}
+
+model BundleApp {
+  id Int @id
+
+  bundleId Int
+  appId    Int
+
+  bundle App @relation(fields: [bundleId], references: [id])
 
   @@index([id])
 }

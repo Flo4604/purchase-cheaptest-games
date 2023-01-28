@@ -9,6 +9,8 @@ const sleep = (ms) => promisify(setTimeout)(ms);
 const asyncFilter = async (arr, predicate) => Promise.all(arr.map(predicate))
   .then((results) => arr.filter((_v, index) => results[index]));
 
+const toCents = (price) => String(Math.round(price * 100)).replace(/,|\./g, '');
+
 export {
-  roundPrice, removeDuplicates, sleep, asyncFilter,
+  roundPrice, removeDuplicates, sleep, asyncFilter, toCents,
 };
