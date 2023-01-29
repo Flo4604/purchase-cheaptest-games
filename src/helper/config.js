@@ -124,7 +124,7 @@ const buyChoices = async (account, wallet, ownedGameCount) => {
 
     ]);
 
-    limit = answer.badge;
+    limit = answer.badge - ownedGameCount;
   } else if (answers.usage === 'next') {
     logger.info(`You currently own ${ownedGameCount} games and the next badge is at ${BADGES.find((i) => i >= ownedGameCount)} games. `);
     limit = BADGES.find((i) => i >= ownedGameCount) - ownedGameCount;
@@ -154,10 +154,10 @@ const buyChoices = async (account, wallet, ownedGameCount) => {
 
   // go through all the options and create a flag
   // eslint-disable-next-line no-bitwise
-  const optionsFlag = extraOptions.options.reduce((a, b) => a | b, 0);
+  const priceOptionsFlag = extraOptions.options.reduce((a, b) => a | b, 0);
 
   if (answers.usage !== 'preview' && await confirm('Do you want to save these settings?')) {
-    await updateConfig(account.id, limit, answers.usage, maxPrice.maxPrice, optionsFlag);
+    await updateConfig(account.id, limit, answers.usage, maxPrice.maxPrice, priceOptionsFlag);
   }
 
   return {
@@ -165,7 +165,7 @@ const buyChoices = async (account, wallet, ownedGameCount) => {
     usage: answers.usage,
     limit,
     maxPrice: maxPrice.maxPrice,
-    optionsFlag,
+    priceOptionsFlag,
   };
 };
 
@@ -203,7 +203,7 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
             Limit: ${account.limit === '0' ? '∞' : account.limit}
             Usage: ${TRANSLATION[account.usage]}
             Max Price: ${account.maxPrice === 0 ? 'No limit' : `${account.maxPrice} ${wallet.currency}`}
-            Extra options: ${getExtraOptions(account.optionsFlag).join('|')}`,
+            Extra options: ${getExtraOptions(account.priceOptionsFlag).join('|')}`,
             value: 'continue',
             checked: true,
           },
@@ -217,10 +217,11 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
 
     if (answers.usage === 'continue') {
       return {
+        mode: 'buy',
         limit: account.limit,
         usage: account.usage,
         maxPrice: account.maxPrice,
-        optionsFlag: account.optionsFlag,
+        priceOptionsFlag: account.priceOptionsFlag,
       };
     }
   }

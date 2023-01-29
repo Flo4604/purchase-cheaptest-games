@@ -45,8 +45,8 @@ const postRequest = async (url, data, headers = {}) => new Promise(async (resolv
   });
 });
 
-const getRequest = async (url) => new Promise(async (resolve) => {
-  steamCommunity.httpRequestGet(url, (err, response, body) => {
+const getRequest = async (url, headers = {}) => new Promise(async (resolve) => {
+  steamCommunity.httpRequestGet(url, headers, (err, response, body) => {
     if (err) {
       logger.warn(err.message);
       resolve(false);
@@ -187,21 +187,25 @@ const doLogin = async ({
       if (error) {
         switch (error.message) {
           case 'SteamGuardMobile':
-            await doLogin({
-              username, password, guardType: 'mobile', id: accountId,
-            });
+            resolve(
+              await doLogin({
+                username, password, guardType: 'mobile', id: accountId,
+              }),
+            );
             break;
           case 'SteamGuard':
-            await doLogin({
-              username, password, guardType: 'email', id: accountId,
-            });
+            resolve(
+              await doLogin({
+                username, password, guardType: 'email', id: accountId,
+              }),
+            );
             break;
           case 'CAPTCHA':
             reject(logger.log("We don't support captcha yet"));
             break;
           case 'The account name or password that you have entered is incorrect.':
             logger.log('The account name or password that you have entered is incorrect. Please try again.');
-            await addAccount(accountId);
+            resolve(await addAccount(accountId));
             break;
           default:
             logger.error(error);
@@ -306,7 +310,7 @@ const bypassMaturityCheck = async (appId, appPage) => {
 };
 
 async function getAppDetails(app, forceUrl = false) {
-  const { appId, isBundle = false, includedApps = [] } = app;
+  const { appId, isBundle = false, includedApps = undefined } = app;
 
   const appInDb = await getApp(appId);
 
@@ -368,7 +372,7 @@ const loadCheapestGames = async (
   limitedGames,
 ) => {
   const {
-    maxPrice, usage, limit, optionsFlag,
+    maxPrice, usage, limit, priceOptionsFlag,
   } = config;
 
   const appsToBuy = [];
@@ -402,11 +406,11 @@ const loadCheapestGames = async (
       sessionid: global.sessionId,
     };
 
-    // bitwise operator to check if the optionsFlag is set
+    // bitwise operator to check if the priceOptionsFlag is set
     // eslint-disable-next-line no-bitwise
-    if (optionsFlag & EXTRA_OPTIONS.TRADING_CARDS
+    if (priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS
          // eslint-disable-next-line no-bitwise
-         || optionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED) {
+         || priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED) {
       data.category2 = '29';
     }
 
@@ -435,7 +439,6 @@ const loadCheapestGames = async (
         return [];
       }
 
-      //   if the url is https://store.steampowered.com/sub/
       if (appUrl.startsWith('https://store.steampowered.com/sub/')) {
         // the appId will be the subId
         const subId = appUrl.split('/')[4];
@@ -444,7 +447,15 @@ const loadCheapestGames = async (
           await getAppDetails({ name, appId: id, price });
         });
 
-        await getAppDetails({ name, appId: subId, price }, appUrl);
+        await getAppDetails({
+          name,
+          appId: subId,
+          price,
+          includedApps: (appId.split(',')).forEach((id) => ({
+            appId: id,
+            bundleId: subId,
+          })),
+        }, appUrl);
 
         return {
           name,
@@ -507,7 +518,7 @@ const loadCheapestGames = async (
 
       // check if the app is limited and we do not have the TRADING_CARDS_LIMITED option set
       // eslint-disable-next-line no-bitwise
-      if (app.limited && !(optionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED)) {
+      if (app.limited && !(priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED)) {
         return false;
       }
 
@@ -519,12 +530,27 @@ const loadCheapestGames = async (
         return false;
       }
 
-      //   if(app.)
+      if (app.includedApps.length > 0) {
+        const ignoreDueToIncludedApps = app.includedApps.forEach((element) => {
+          if (ownedApps.includes(element.id)) {
+            return false;
+          }
+
+          if (appsToBuy.find((appToBuy) => appToBuy.appId === element.id)) {
+            return false;
+          }
+          return true;
+        });
+
+        if (!ignoreDueToIncludedApps) {
+          return false;
+        }
+      }
 
       // eslint-disable-next-line no-bitwise
-      if ((optionsFlag & EXTRA_OPTIONS.TRADING_CARDS
+      if ((priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS
         // eslint-disable-next-line no-bitwise
-        || optionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED)
+        || priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED)
         && !app.hasTradingCards) {
         return false;
       }
@@ -544,12 +570,14 @@ const loadCheapestGames = async (
         loop = false;
         break;
       }
+
       if (['balance'].includes(usage) && currentPriceOfAllApps + app.price >= limit) {
         logger.info(`The current price of all apps (${currentPriceOfAllApps} ${wallet.currency}) plus the price of the next app (${app.price} ${wallet.currency}) is higher than the limit (${limit} ${wallet.currency})`);
         loop = false;
         break;
       }
-      if (['amount', 'next'].includes(usage) && appsToBuy.length >= limit) {
+
+      if (['amount', 'next', 'preview'].includes(usage) && appsToBuy.length >= limit) {
         logger.info(`The current amount of apps (${appsToBuy.length}) is higher than the limit (${limit})`);
         loop = false;
         if (appsToBuy.length + 1 <= limit) {
@@ -557,10 +585,6 @@ const loadCheapestGames = async (
           loop = false;
         }
         break;
-      }
-      if (['preview'].includes(usage) && appsToBuy.length + realOwnedAppCount >= limit) {
-        logger.info(`The current amount of apps (${appsToBuy.length + realOwnedAppCount}) is higher than the limit (${limit})`);
-        loop = false;
       }
 
       if (!loop) break;
@@ -573,12 +597,14 @@ const loadCheapestGames = async (
     const totalPrice = roundPrice(appsToBuy.reduce((acc, app) => acc + app.price, 0));
     const averagePrice = roundPrice(totalPrice / appsToBuy.length || 0);
 
-    bar.update(appsToBuy.length, {
+    bar.update(appsToBuy.length + 1, {
       totalPrice: `${totalPrice} ${wallet.currency}`,
       averagePrice: `${averagePrice} ${wallet.currency}`,
       duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
     });
   }
+
+  bar.stop();
 
   return appsToBuy;
 };
@@ -871,7 +897,10 @@ const getItemPrice = async (appId, marketHashName, currency) => {
   url.searchParams.append('appid', appId);
   url.searchParams.append('market_hash_name', marketHashName);
 
-  const response = responseToJSON(await getRequest(url.href).catch(() => ({ })));
+  const response = responseToJSON(await getRequest(url.href, {
+    Referer: 'https://steamcommunity.com/market/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+  }).catch(() => ({ })));
 
   let price = -1;
 
@@ -1007,7 +1036,7 @@ const removeOverpricedItems = async (wallet) => {
 
     if (typeof cache[cardsOnMarket[i].hashName] === 'undefined') {
       price = await getItemPrice(753, cardsOnMarket[i].hashName, wallet.currency);
-      await sleep(5000);
+      await sleep(10000);
 
       if (price === -1) {
         rateLimitCount += 1;

@@ -35,7 +35,7 @@ const updateSteamGuard = async (id, steamGuard) => prisma.account.update({
   },
 });
 
-const updateConfig = async (id, limit, usage, maxPrice, optionsFlag) => prisma.account.update({
+const updateConfig = async (id, limit, usage, maxPrice, priceOptionsFlag) => prisma.account.update({
   where: {
     id,
   },
@@ -43,7 +43,7 @@ const updateConfig = async (id, limit, usage, maxPrice, optionsFlag) => prisma.a
     limit: `${limit}`,
     usage,
     maxPrice: Number(maxPrice),
-    optionsFlag,
+    priceOptionsFlag,
   },
 });
 

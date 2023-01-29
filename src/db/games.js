@@ -61,7 +61,7 @@ const updateGame = async (id, limited, hasTradingCards) => {
 };
 
 const getApp = async (id) => prisma.app.findUnique({
-  where: { id: Number(id) },
+  where: { id: Number(id) }, include: { includedApps: true },
 });
 
 const getLimitedGames = async () => prisma.app.findMany({

@@ -37,7 +37,6 @@ global.sessionId = sessionId;
 
 const ownedApps = await getOwnedApps(await getLimitedGames());
 const ownedAppsRealCount = await getOwnedAppsCount();
-
 const wallet = await getWalletBalance();
 
 // const badge = badges.find((b) => wallet >= b) || badges[badges.length - 1];
