@@ -36,8 +36,10 @@ const postRequest = async (url, data, headers = {}) => new Promise(async (resolv
     headers,
   }, (err, response, body) => {
     if (err) {
-      logger.info(body);
-      logger.warn(err.message);
+      if (err.message !== 'HTTP error 429') {
+        logger.info(body);
+        logger.warn(err.message);
+      }
       resolve(false);
     }
 
@@ -48,7 +50,10 @@ const postRequest = async (url, data, headers = {}) => new Promise(async (resolv
 const getRequest = async (url, headers = {}) => new Promise(async (resolve) => {
   steamCommunity.httpRequestGet(url, headers, (err, response, body) => {
     if (err) {
-      logger.warn(err.message);
+      if (err.message !== 'HTTP error 429') {
+        logger.info(body);
+        logger.warn(err.message);
+      }
       resolve(false);
     }
     resolve(body);
@@ -612,7 +617,7 @@ const loadCheapestGames = async (
 const addGamesToCart = async (apps) => {
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
-    format: 'Adding games to cart | {bar} | {percentage}% | {value}/{total} Games | ETA: {eta}s',
+    format: 'Adding games to cart | {bar} | {percentage}% | {value}/{total} Games | Time Elapsed: {duration}s | ETA: {eta}s',
   }, cliProgress.Presets.shades_grey);
 
   bar.start(apps.length, 1);
@@ -629,6 +634,7 @@ const addGamesToCart = async (apps) => {
 
     if (response.match(/Your item has been added!/) === null) {
       logger.error(`Error adding app ${app.name} (${app.appId}) to cart`);
+      writeFileSync(`./debug/cart+error_${app.id}.html`, response);
     } else {
       const $ = cheerio.load(response);
 
@@ -636,12 +642,17 @@ const addGamesToCart = async (apps) => {
       if (global.shoppingCartGID !== $('input[name="cart"]').val()) {
         global.shoppingCartGID = $('input[name="cart"]').val();
       }
-
-      bar.update(i);
     }
+    bar.update(i);
   }
 
   return true;
+};
+
+const forgetCart = async () => {
+  // get our cookies from the browser
+
+  console.log(steamCommunity._request._jar);
 };
 
 const finalizeTransaction = async (transactionId) => {
@@ -890,6 +901,22 @@ const sellItem = async (appId, contextId, assetId, price, amount) => {
   });
 };
 
+const getItemPriceBackup = async (appId, marketHashName) => {
+  const url = new URL('https://steamcommunity.com/market/multibuy');
+  url.searchParams.append('appid', appId);
+  url.searchParams.append('contextid', '2');
+  url.searchParams.append('items[]', marketHashName);
+
+  const response = await getRequest(url.href, {
+    Referer: 'https://steamcommunity.com/market/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36',
+  });
+
+  const $ = cheerio.load(response);
+
+  return balanceToAmount($('.market_dialog_input.market_multi_price').val()).amount;
+};
+
 const getItemPrice = async (appId, marketHashName, currency) => {
   const url = new URL('https://steamcommunity.com/market/priceoverview/');
   url.searchParams.append('country', COUNTRY_CODES[currency]);
@@ -910,6 +937,11 @@ const getItemPrice = async (appId, marketHashName, currency) => {
     }
 
     price = balanceToAmount(response.lowest_price).amount;
+  } else {
+    const backupPrice = await getItemPriceBackup(appId, marketHashName);
+    if (backupPrice > 0) {
+      price = backupPrice;
+    }
   }
 
   return price;
@@ -1022,30 +1054,26 @@ const removeOverpricedItems = async (wallet) => {
 
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
-    format: 'Removing Cards | {bar} | {percentage}% | Checked {value}/{total} Possible Market Listings | Removed {removedCount} Listings | ETA: {eta}s',
+    format: 'Removing Cards | {bar} | {percentage}% | Checked {value}/{total} Possible Market Listings | Removed {removedCount} Listings | Time Elapsed: {duration}s | ETA: {eta}s',
   }, cliProgress.Presets.shades_grey);
-  bar.start(cardsOnMarket.length, 0, { removedCount: 0 });
+  bar.start(cardsOnMarket.length, 0, { removedCount: 0, duration: 0 });
 
   const cache = {};
-  let rateLimitCount = 0;
   let removedCount = 0;
+  const startTime = moment().valueOf();
 
   for (let i = 0; i < cardsOnMarket.length; i += 1) {
     let price = 0;
-    bar.update(i + 1, { removedCount });
+    bar.update(i + 1, {
+      removedCount,
+      duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
+    });
 
     if (typeof cache[cardsOnMarket[i].hashName] === 'undefined') {
       price = await getItemPrice(753, cardsOnMarket[i].hashName, wallet.currency);
-      await sleep(10000);
+      await sleep(300);
 
       if (price === -1) {
-        rateLimitCount += 1;
-        if (rateLimitCount >= 5) {
-          logger.info('Hit 5 rate limits!, waiting 3 minutes');
-          await sleep(3 * 60 * 1000);
-          rateLimitCount = 0;
-        }
-
         // eslint-disable-next-line no-continue
         continue;
       }
@@ -1092,9 +1120,6 @@ const buyGames = async (config, ownedApps, ownedAppsRealCount, wallet) => {
 
       await sleep(60);
     }
-
-    await addGamesToCart(appList);
-    await checkoutCart();
   }
 };
 
@@ -1104,10 +1129,10 @@ const sellCards = async (config, wallet) => {
 
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
-    format: 'Selling Trading Cards | {bar} | {percentage}% | {value}/{total} Trading Cards | {eta}%s',
+    format: `Selling Trading Cards | {bar} | {percentage}% | {value}/{total} Trading Cards | Time Elapsed: {duration}s | {eta}s | Total Price: {price} ${wallet.currency}`,
   }, cliProgress.Presets.shades_grey);
-  bar.start(tradingCards.length, 0);
-
+  bar.start(tradingCards.length, 0, { duration: 0, price: 0 });
+  const startTime = moment().valueOf();
   let totalPrice = 0;
   const priceCache = {};
 
@@ -1118,7 +1143,7 @@ const sellCards = async (config, wallet) => {
 
     if (typeof priceCache[card.market_hash_name] === 'undefined') {
       price = await getItemPrice(card.appid, card.market_hash_name, wallet.currency);
-      await sleep(3500);
+      await sleep(300);
 
       if (price === -1) {
         // eslint-disable-next-line no-continue
@@ -1132,15 +1157,18 @@ const sellCards = async (config, wallet) => {
 
     const cards = tradingCards.filter((c) => c.market_hash_name === card.market_hash_name);
 
-    // do price - 0.01 and decrease by 13 % and convert to cents
-    const quickSellPrice = toCents((price - 0.01).toFixed(2) * 0.87 * 100);
+    const calculatedPrice = parseFloat(price) - 0.01;
+
+    // calculate - 0.13043478261%
+    const quickSellPrice = String(Math.round((calculatedPrice - (calculatedPrice * 0.13043478261)).toFixed(2) * 100)).replace(/\./, '');
 
     totalPrice += quickSellPrice * cards.length;
 
     await sellItem(card.appid, card.contextid, card.assetid, quickSellPrice, cards.length);
-    bar.update(i + 1);
-    logger.log(`Sell ${cards.length} ${card.market_hash_name} for ${(quickSellPrice / 100).toFixed(2)} `);
-    logger.log(`Total price: ${(totalPrice / 100.0).toFixed(2)} ${wallet.currency}`);
+    bar.update(i + 1, {
+      duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
+      price: (parseFloat(totalPrice) / 100.0).toFixed(2),
+    });
   }
 };
 
