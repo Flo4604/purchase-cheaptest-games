@@ -37,8 +37,7 @@ const postRequest = async (url, data, headers = {}) => new Promise(async (resolv
   }, (err, response, body) => {
     if (err) {
       if (err.message !== 'HTTP error 429') {
-        logger.info(body);
-        logger.warn(err.message);
+        logger.warn(err.message, body);
       }
       resolve(false);
     }
@@ -51,8 +50,7 @@ const getRequest = async (url, headers = {}) => new Promise(async (resolve) => {
   steamCommunity.httpRequestGet(url, headers, (err, response, body) => {
     if (err) {
       if (err.message !== 'HTTP error 429') {
-        logger.info(body);
-        logger.warn(err.message);
+        logger.warn(err.message, body);
       }
       resolve(false);
     }
@@ -258,7 +256,7 @@ const doLogin = async ({
 const getWalletBalance = async () => new Promise(async (resolve) => {
   steamStore.getWalletBalance((err, response) => {
     if (err) {
-      logger.log(err);
+      logger.error(`Error getting wallet balance: ${err}`);
     }
 
     const { amount, currency } = balanceToAmount(response.formattedBalance);
@@ -306,7 +304,7 @@ const bypassMaturityCheck = async (appId, appPage) => {
       logger.error(`bypassMaturityCheck():2 - Error bypassing maturity check for ${appId}`, ageResponse);
       break;
     default:
-      logger.log(ageResponse);
+      logger.log(`bypassMaturityCheck():default - Error bypassing maturity check for ${appId}`, ageResponse);
 
       break;
   }
@@ -367,6 +365,11 @@ async function getAppDetails(app, forceUrl = false) {
   return app;
 }
 
+const fixMarketHashName = (marketHashName) => {
+  const fixedMarketHashName = marketHashName.replace(/\//g, '-');
+  return fixedMarketHashName;
+};
+
 const loadCheapestGames = async (
   config,
   start,
@@ -387,7 +390,7 @@ const loadCheapestGames = async (
     stopOnComplete: true,
     format: 'Loading Games | {bar} | {percentage}% | {value}/{total} that fit the criteria | ETA: {eta}s | Time Elapsed: {duration}s | Total Price {totalPrice} | Average Price {averagePrice}',
   }, cliProgress.Presets.shades_grey);
-  bar.start(config.limit, 0, {
+  bar.start(config.limit === '0' ? Infinity : 0, 0, {
     totalPrice: 0,
     averagePrice: 0,
     duration: 0,
@@ -597,16 +600,18 @@ const loadCheapestGames = async (
       appsToBuy.push(app);
     }
 
-    if (!loop) break;
-
     const totalPrice = roundPrice(appsToBuy.reduce((acc, app) => acc + app.price, 0));
     const averagePrice = roundPrice(totalPrice / appsToBuy.length || 0);
+
+    // moment to relativetimestamp
 
     bar.update(appsToBuy.length + 1, {
       totalPrice: `${totalPrice} ${wallet.currency}`,
       averagePrice: `${averagePrice} ${wallet.currency}`,
       duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
     });
+
+    if (!loop) break;
   }
 
   bar.stop();
@@ -649,7 +654,15 @@ const addGamesToCart = async (apps) => {
   return true;
 };
 
+// this will remove all items with notes and apps / packages that we already own
+const clearCartPage = async (cartPage) => {
+  const $ = cheerio.load(cartPage);
+
+  //   get all elements which have a text called See note below
+};
+
 const forgetCart = async () => {
+  global.shoppingCartGID = null;
   // get our cookies from the browser
 
   console.log(steamCommunity._request._jar);
@@ -889,7 +902,7 @@ const getOwnedAppsCount = async () => {
 };
 
 const sellItem = async (appId, contextId, assetId, price, amount) => {
-  const response = await postRequest('https://steamcommunity.com/market/sellitem/', {
+  const response = responseToJSON(await postRequest('https://steamcommunity.com/market/sellitem/', {
     sessionid: global.sessionId,
     appid: appId,
     contextid: contextId,
@@ -898,7 +911,12 @@ const sellItem = async (appId, contextId, assetId, price, amount) => {
     price,
   }, {
     Referer: `https://steamcommunity.com/profiles/${steamCommunity.steamID.getSteamID64()}/inventory/`,
-  });
+  }));
+
+  if (response?.success !== true) {
+    logger.error('Could not sell item', response);
+    return false;
+  }
 };
 
 const getItemPriceBackup = async (appId, marketHashName) => {
@@ -911,6 +929,8 @@ const getItemPriceBackup = async (appId, marketHashName) => {
     Referer: 'https://steamcommunity.com/market/',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36',
   });
+
+  if (!response) return -1;
 
   const $ = cheerio.load(response);
 
@@ -963,7 +983,7 @@ const getInventory = () => new Promise((resolve, reject) => {
   );
 });
 
-const getCardMarketListings = async () => {
+const getCardMarketListings = async (settings) => {
   let loop = true;
 
   let start = 0;
@@ -1000,12 +1020,16 @@ const getCardMarketListings = async () => {
         const hashName = `${$(listing).find('.market_listing_item_name_link').attr('href').split('-')[0].split('/')[6]}-${$(listing).find('.market_listing_item_name_link').text()}`;
 
         if (listingName.includes('Card') || listingName.includes('card')) {
-          tradingCards.push({
-            listingId,
-            listingName,
-            listingPrice,
-            hashName,
-          });
+          if (typeof hashName === 'undefined') {
+            logger.error('getCardMarketListings() Error getting card market listings', response);
+          } else {
+            tradingCards.push({
+              listingId,
+              listingName,
+              listingPrice,
+              hashName,
+            });
+          }
 
           bar.update(tradingCards.length);
         }
@@ -1049,28 +1073,38 @@ const removeMarketListing = async (listingId) => {
   return true;
 };
 
-const removeOverpricedItems = async (wallet) => {
+const removeOverpricedItems = async (wallet, config, sellAll = false) => {
   const cardsOnMarket = await getCardMarketListings();
 
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
-    format: 'Removing Cards | {bar} | {percentage}% | Checked {value}/{total} Possible Market Listings | Removed {removedCount} Listings | Time Elapsed: {duration}s | ETA: {eta}s',
+    format: `Removing Cards | {bar} | {percentage}% | Checked {value}/{total} Market Listings | Removed {removedCount} Listings | Time Elapsed: {duration}s | ETA: {eta}s | Total Price: {price} ${wallet.currency}`,
   }, cliProgress.Presets.shades_grey);
-  bar.start(cardsOnMarket.length, 0, { removedCount: 0, duration: 0 });
+  bar.start(cardsOnMarket.length, 0, { removedCount: 0, duration: 0, price: 0 });
 
   const cache = {};
   let removedCount = 0;
+  let totalPrice = 0;
   const startTime = moment().valueOf();
 
   for (let i = 0; i < cardsOnMarket.length; i += 1) {
     let price = 0;
+    const PriceWithoutFees = (
+      parseFloat(totalPrice) - (parseFloat(totalPrice) * 0.13043478261)
+    ).toFixed(2);
+
     bar.update(i + 1, {
       removedCount,
       duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
+      price: PriceWithoutFees,
     });
 
     if (typeof cache[cardsOnMarket[i].hashName] === 'undefined') {
-      price = await getItemPrice(753, cardsOnMarket[i].hashName, wallet.currency);
+      price = await getItemPrice(
+        753,
+        fixMarketHashName(cardsOnMarket[i].hashName),
+        wallet.currency,
+      );
       await sleep(300);
 
       if (price === -1) {
@@ -1082,11 +1116,15 @@ const removeOverpricedItems = async (wallet) => {
       price = cache[cardsOnMarket[i].hashName];
     }
 
-    if (cardsOnMarket[i].listingPrice > price) {
+    if (cardsOnMarket[i].listingPrice > price || sellAll) {
       removedCount += 1;
       await removeMarketListing(cardsOnMarket[i].listingId);
     }
+
+    totalPrice += cardsOnMarket[i].listingPrice;
   }
+
+  bar.stop();
 };
 
 const buyGames = async (config, ownedApps, ownedAppsRealCount, wallet) => {
@@ -1118,6 +1156,8 @@ const buyGames = async (config, ownedApps, ownedAppsRealCount, wallet) => {
 
       await checkoutCart();
 
+      await forgetCart();
+
       await sleep(60);
     }
   }
@@ -1142,7 +1182,11 @@ const sellCards = async (config, wallet) => {
     let price = 0;
 
     if (typeof priceCache[card.market_hash_name] === 'undefined') {
-      price = await getItemPrice(card.appid, card.market_hash_name, wallet.currency);
+      price = await getItemPrice(
+        card.appid,
+        fixMarketHashName(card.market_hash_name),
+        wallet.currency,
+      );
       await sleep(300);
 
       if (price === -1) {
@@ -1155,16 +1199,23 @@ const sellCards = async (config, wallet) => {
       price = priceCache[card.market_hash_name];
     }
 
-    const cards = tradingCards.filter((c) => c.market_hash_name === card.market_hash_name);
+    const { priceToRemove, priceCalculation } = config;
 
-    const calculatedPrice = parseFloat(price) - 0.01;
+    let calculatedPrice = 0;
+
+    if (priceCalculation === 'percentage') {
+      calculatedPrice = price - (price * (priceToRemove / 100));
+    } else if (priceCalculation === 'fixed') {
+      calculatedPrice = price - priceToRemove;
+    }
 
     // calculate - 0.13043478261%
-    const quickSellPrice = String(Math.round((calculatedPrice - (calculatedPrice * 0.13043478261)).toFixed(2) * 100)).replace(/\./, '');
+    const sellPrice = String(Math.round((calculatedPrice - (calculatedPrice * 0.13043478261)).toFixed(2) * 100)).replace(/\./, '');
 
-    totalPrice += quickSellPrice * cards.length;
+    totalPrice += Number(sellPrice);
 
-    await sellItem(card.appid, card.contextid, card.assetid, quickSellPrice, cards.length);
+    await sellItem(card.appid, card.contextid, card.assetid, sellPrice, 1);
+
     bar.update(i + 1, {
       duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
       price: (parseFloat(totalPrice) / 100.0).toFixed(2),

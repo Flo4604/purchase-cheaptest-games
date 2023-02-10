@@ -32,26 +32,69 @@ const confirm = async (message) => {
 const getExtraOptions = (optionsFlag) => {
   const options = [];
 
-  Object.entries(EXTRA_OPTIONS).forEach(([key, value]) => {
-    // eslint-disable-next-line no-bitwise
-    if (optionsFlag & value) {
-      options.push(TRANSLATION[key]);
-    }
+  Object.entries(EXTRA_OPTIONS).forEach(([, value]) => {
+    Object.entries(value).forEach(([key]) => {
+      // eslint-disable-next-line no-bitwise
+      if (optionsFlag & value) {
+        options.push(TRANSLATION[key]);
+      }
+    });
   });
 
   return options;
 };
 
-const sellChoices = (account, wallet) => {
-  const choices = [
+const sellChoices = async () => {
+  const extraOptions = await inquirer.prompt([
     {
-      name: 'Sell all trading cards',
-      value: 'all',
+      type: 'checkbox',
+      message: 'Choose extra options',
+      name: 'options',
+      choices: Object.entries(EXTRA_OPTIONS.SELLING).map(
+        ([key, value]) => ({
+          name: TRANSLATION[key],
+          value,
+          checked: value === EXTRA_OPTIONS.SELLING.ALL_TRADING_CARDS,
+        }),
+      ),
+    }]);
+
+  // eslint-disable-next-line no-bitwise
+  const sellOptionsFlag = extraOptions.options.reduce((a, b) => a | b, 0);
+
+  const priceCalculation = await inquirer.prompt([
+    {
+      type: 'list',
+      message: 'Choose how the script should calculate the price',
+      name: 'priceCalculation',
+      choices: [
+        {
+          name: 'Remove a fixed amount',
+          value: 'fixed',
+        },
+        {
+          name: 'Remove a percentage',
+          value: 'percentage',
+        },
+      ],
     },
-  ];
+  ]);
+
+  const priceToRemoveAnswer = await inquirer.prompt([
+    {
+      type: 'input',
+      message: 'How much should be removed from the price?',
+      name: 'priceToRemove',
+      default: priceCalculation.priceCalculation === 'fixed' ? 0.03 : 1,
+      validate: (value) => (Number.isNaN(value) ? 'Please enter a valid number' : true),
+    },
+  ]);
 
   return {
     mode: 'sell',
+    sellOptionsFlag,
+    priceToRemove: priceToRemoveAnswer.priceToRemove,
+    priceCalculation: priceCalculation.priceCalculation,
   };
 };
 
@@ -147,7 +190,7 @@ const buyChoices = async (account, wallet, ownedGameCount) => {
       type: 'checkbox',
       message: 'Choose extra options',
       name: 'options',
-      choices: Object.entries(EXTRA_OPTIONS).map(
+      choices: Object.entries(EXTRA_OPTIONS.BUYING).map(
         ([key, value]) => ({ name: TRANSLATION[key], value }),
       ),
     }]);
@@ -199,10 +242,10 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
         name: 'usage',
         choices: [
           {
-            name: `Continue with old config:
+            name: `Buy games with old config:
             Limit: ${account.limit === '0' ? '∞' : account.limit}
             Usage: ${TRANSLATION[account.usage]}
-            Max Price: ${account.maxPrice === 0 ? 'No limit' : `${account.maxPrice} ${wallet.currency}`}
+            Max Price: ${account.maxPrice === 0 ? '∞' : `${account.maxPrice} ${wallet.currency}`}
             Extra options: ${getExtraOptions(account.priceOptionsFlag).join('|')}`,
             value: 'continue',
             checked: true,
@@ -210,6 +253,26 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
           {
             name: 'Edit config',
             value: 'edit',
+          },
+          {
+            name: 'Sell Trading Cards',
+            value: 'sell',
+          },
+          {
+            name: 'Clean up Trading Card Listings',
+            value: 'cleanup',
+          },
+          {
+            name: 'Remove All Trading Card Listings',
+            value: 'cleanAll',
+          },
+          {
+            name: 'Exit',
+            value: 'exit',
+          },
+          {
+            name: 'Choose a different account',
+            value: 'chooseAccount',
           },
         ],
       },
@@ -224,37 +287,13 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
         priceOptionsFlag: account.priceOptionsFlag,
       };
     }
-  }
 
-  const answers = await inquirer.prompt([
-    {
-      type: 'list',
-      message: 'What do you want to do?',
-      name: 'usage',
-      choices: [
-        {
-          name: 'Buy games',
-          value: 'buy',
-          checked: true,
-        },
-        {
-          name: 'Sell Trading Cards',
-          value: 'sell',
-        },
-        {
-          name: 'Clean up Trading Card Listings',
-          value: 'cleanup',
-        },
-      ],
-    },
-  ]);
+    if (answers.usage === 'sell') {
+      return sellChoices(account, wallet);
+    }
 
-  if (answers.usage === 'sell') {
-    return sellChoices(account, wallet);
-  }
-  if (answers.usage === 'cleanup') {
     return {
-      mode: 'cleanup',
+      mode: answers.usage,
     };
   }
 

@@ -2,8 +2,15 @@
 const HIGHEST_GAME_BADGE = 32;
 
 const EXTRA_OPTIONS = {
-  TRADING_CARDS: 1 << 0,
-  TRADING_CARDS_LIMITED: 1 << 1,
+  BUYING: {
+    TRADING_CARDS: 1 << 0,
+    TRADING_CARDS_LIMITED: 1 << 1,
+  },
+  SELLING: {
+    ALL_TRADING_CARDS: 1 << 0,
+    NORMAL_TRADING_CARDS: 1 << 1,
+    FOIL_TRADING_CARDS: 1 << 2,
+  },
 };
 
 const MAX_PRICES = {
@@ -31,6 +38,9 @@ const TRANSLATION = {
   preview: 'Preview how much money it would cost for a certain badge',
   TRADING_CARDS: 'Trading Cards (Only Games that add to count)',
   TRADING_CARDS_LIMITED: 'Trading Cards (All Games)',
+  FOIL_TRADING_CARDS: 'Foil Trading Cards',
+  NORMAL_TRADING_CARDS: 'Normal Trading Cards',
+  ALL_TRADING_CARDS: 'All Trading Cards',
 };
 
 export {
