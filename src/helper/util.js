@@ -11,6 +11,10 @@ const asyncFilter = async (arr, predicate) => Promise.all(arr.map(predicate))
 
 const toCents = (price) => String(Math.round(price * 100)).replace(/,|\./g, '');
 
+const getPriceWithoutFees = (price) => (
+  parseFloat(price) - (parseFloat(price) * 0.13043478261)
+);
+
 export {
-  roundPrice, removeDuplicates, sleep, asyncFilter, toCents,
+  roundPrice, removeDuplicates, sleep, asyncFilter, toCents, getPriceWithoutFees,
 };

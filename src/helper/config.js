@@ -33,11 +33,9 @@ const getExtraOptions = (optionsFlag) => {
   const options = [];
 
   Object.entries(EXTRA_OPTIONS).forEach(([, value]) => {
-    Object.entries(value).forEach(([key]) => {
+    Object.entries(value).forEach(([obj, v]) => {
       // eslint-disable-next-line no-bitwise
-      if (optionsFlag & value) {
-        options.push(TRANSLATION[key]);
-      }
+      if (optionsFlag & v) options.push(TRANSLATION[obj]);
     });
   });
 
@@ -199,6 +197,8 @@ const buyChoices = async (account, wallet, ownedGameCount) => {
   // eslint-disable-next-line no-bitwise
   const priceOptionsFlag = extraOptions.options.reduce((a, b) => a | b, 0);
 
+  console.log(priceOptionsFlag);
+
   if (answers.usage !== 'preview' && await confirm('Do you want to save these settings?')) {
     await updateConfig(account.id, limit, answers.usage, maxPrice.maxPrice, priceOptionsFlag);
   }
@@ -234,7 +234,6 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
   }
 
   if (account.limit !== undefined && account.usage !== undefined) {
-    // const text =
     const answers = await inquirer.prompt([
       {
         type: 'list',
@@ -290,6 +289,10 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
 
     if (answers.usage === 'sell') {
       return sellChoices(account, wallet);
+    }
+
+    if (answers.usage === 'edit') {
+      return buyChoices(account, wallet, ownedGameCount);
     }
 
     return {

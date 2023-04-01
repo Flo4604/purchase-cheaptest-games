@@ -7,7 +7,7 @@ import Steamcommunity from 'steamcommunity';
 import SteamStore from 'steamstore';
 import * as cheerio from 'cheerio';
 import qs from 'qs';
-import { writeFileSync } from 'fs';
+import { fstat, writeFileSync } from 'fs';
 import cliProgress from 'cli-progress';
 import moment from 'moment';
 import {
@@ -18,7 +18,7 @@ import {
 } from '../db/games';
 import logger from './logger';
 import {
-  asyncFilter, roundPrice, sleep, toCents,
+  asyncFilter, getPriceWithoutFees, roundPrice, sleep, toCents,
 } from './util';
 import {
   COUNTRY_CODES, CURRENCY_CODES, EXTRA_OPTIONS, MAX_PRICES,
@@ -313,11 +313,14 @@ const bypassMaturityCheck = async (appId, appPage) => {
 };
 
 async function getAppDetails(app, forceUrl = false) {
-  const { appId, isBundle = false, includedApps = undefined } = app;
+  const {
+    appId, isBundle = false, includedApps = undefined, price,
+  } = app;
 
   const appInDb = await getApp(appId);
 
   if (appInDb && Number(app.price) === appInDb.price && appInDb.id === appId) {
+    console.log(`app already in db and price is the same so skipping ${appId}`);
     appInDb.isInDb = true;
     return appInDb;
   }
@@ -333,9 +336,33 @@ async function getAppDetails(app, forceUrl = false) {
     return getAppDetails(app, await bypassMaturityCheck(appId, appPage));
   }
 
-  const subId = $('input[name=subid]').val();
-  const snr = $('input[name=snr]').val();
-  const originatingSnr = $('input[name=originating_snr]')?.val() || '1_direct-navigation__';
+  const gameElements = $('.game_area_purchase_game_wrapper').toArray();
+
+  if (gameElements.length === 0) {
+    logger.error(`getAppDetails(): Error getting price elements for ${appId}`);
+    return false;
+  }
+
+  const gameElement = $(gameElements.find((el) => {
+    const element = $(el);
+
+    // find the data-price-final attribute
+    const priceElement = element.find('[data-price-final]');
+
+    return priceElement.length > 0 && priceElement.attr('data-price-final') === toCents(price);
+  }));
+
+  if (gameElement.length === 0) {
+    logger.error(`getAppDetails(): Error getting price element for ${appId}, price: ${toCents(price)}`);
+    writeFileSync(`./debug/${appId}.html`, appPage);
+    return false;
+  }
+
+  // from this element get the subid and snr inputs
+  const subId = gameElement.find('input[name=subid]').val();
+  const snr = gameElement.find('input[name=snr]').val();
+  const originatingSnr = gameElement.find('input[name=originating_snr]').val();
+
   const limitedRegex = /Profile Features Limited|Steam is learning about this game/g;
   const cardRegex = /Steam Trading Cards/g;
   const isLimited = !!limitedRegex.exec(appPage);
@@ -362,6 +389,9 @@ async function getAppDetails(app, forceUrl = false) {
 
   if (appInDb === null) await addApp(app);
 
+  if (appId == '46480') {
+    console.log(appId, app);
+  }
   return app;
 }
 
@@ -387,10 +417,11 @@ const loadCheapestGames = async (
   let loop = true;
 
   const bar = new cliProgress.SingleBar({
-    stopOnComplete: true,
+    stopOnComplete: false,
     format: 'Loading Games | {bar} | {percentage}% | {value}/{total} that fit the criteria | ETA: {eta}s | Time Elapsed: {duration}s | Total Price {totalPrice} | Average Price {averagePrice}',
   }, cliProgress.Presets.shades_grey);
-  bar.start(config.limit === '0' ? Infinity : 0, 0, {
+
+  bar.start(config.limit == '0' ? wallet.balance : config.limit, 0, {
     totalPrice: 0,
     averagePrice: 0,
     duration: 0,
@@ -416,9 +447,9 @@ const loadCheapestGames = async (
 
     // bitwise operator to check if the priceOptionsFlag is set
     // eslint-disable-next-line no-bitwise
-    if (priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS
+    if (priceOptionsFlag & EXTRA_OPTIONS.BUYING.TRADING_CARDS
          // eslint-disable-next-line no-bitwise
-         || priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED) {
+         || priceOptionsFlag & EXTRA_OPTIONS.BUYING.TRADING_CARDS_LIMITED) {
       data.category2 = '29';
     }
 
@@ -526,7 +557,7 @@ const loadCheapestGames = async (
 
       // check if the app is limited and we do not have the TRADING_CARDS_LIMITED option set
       // eslint-disable-next-line no-bitwise
-      if (app.limited && !(priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED)) {
+      if (app.limited && !(priceOptionsFlag & EXTRA_OPTIONS.BUYING.TRADING_CARDS_LIMITED)) {
         return false;
       }
 
@@ -556,9 +587,9 @@ const loadCheapestGames = async (
       }
 
       // eslint-disable-next-line no-bitwise
-      if ((priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS
+      if ((priceOptionsFlag & EXTRA_OPTIONS.BUYING.TRADING_CARDS
         // eslint-disable-next-line no-bitwise
-        || priceOptionsFlag & EXTRA_OPTIONS.TRADING_CARDS_LIMITED)
+        || priceOptionsFlag & EXTRA_OPTIONS.BUYING.TRADING_CARDS_LIMITED)
         && !app.hasTradingCards) {
         return false;
       }
@@ -573,25 +604,22 @@ const loadCheapestGames = async (
 
       const currentPriceOfAllApps = appsToBuy.reduce((acc, appToBuy) => acc + appToBuy.price, 0);
 
-      if (['max'].includes(usage) && currentPriceOfAllApps + app.price >= wallet.balance) {
+      if (['max'].includes(usage) && currentPriceOfAllApps + app.price > wallet.balance) {
         logger.info(`The current price of all apps (${roundPrice(currentPriceOfAllApps)} ${wallet.currency}) plus the price of the next app (${app.price} ${wallet.currency}) is higher than the balance (${wallet.balance} ${wallet.currency})`);
         loop = false;
         break;
       }
 
-      if (['balance'].includes(usage) && currentPriceOfAllApps + app.price >= limit) {
+      if (['balance'].includes(usage) && currentPriceOfAllApps + app.price > limit) {
         logger.info(`The current price of all apps (${currentPriceOfAllApps} ${wallet.currency}) plus the price of the next app (${app.price} ${wallet.currency}) is higher than the limit (${limit} ${wallet.currency})`);
         loop = false;
         break;
       }
 
-      if (['amount', 'next', 'preview'].includes(usage) && appsToBuy.length >= limit) {
+      if (['amount', 'next', 'preview'].includes(usage) && appsToBuy.length > limit) {
         logger.info(`The current amount of apps (${appsToBuy.length}) is higher than the limit (${limit})`);
         loop = false;
-        if (appsToBuy.length + 1 <= limit) {
-          appsToBuy.push(app);
-          loop = false;
-        }
+        if (appsToBuy.length + 1 <= limit) appsToBuy.push(app);
         break;
       }
 
@@ -605,7 +633,7 @@ const loadCheapestGames = async (
 
     // moment to relativetimestamp
 
-    bar.update(appsToBuy.length + 1, {
+    bar.update(config.limit == '0' ? totalPrice : appsToBuy.length, {
       totalPrice: `${totalPrice} ${wallet.currency}`,
       averagePrice: `${averagePrice} ${wallet.currency}`,
       duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
@@ -655,17 +683,64 @@ const addGamesToCart = async (apps) => {
 };
 
 // this will remove all items with notes and apps / packages that we already own
-const clearCartPage = async (cartPage) => {
+const clearCartPage = async () => {
+  const cartPage = await postRequest('https://store.steampowered.com/cart/', {
+    sessionid: global.sessionId,
+  });
+
   const $ = cheerio.load(cartPage);
 
-  //   get all elements which have a text called See note below
+  // get all cart rows with the cart_item_desc_ext class
+  const cartRows = $('span.cart_item_desc_ext');
+
+  // check if the text is See note below
+
+  const cartRowsToRemove = [];
+
+  for (let i = 0; i < cartRows.length; i += 1) {
+    const cartRow = cartRows[i];
+
+    if ($(cartRow).text().trim() === 'See note below') {
+      cartRowsToRemove.push(cartRow);
+    }
+  }
+
+  // remove all cart rows with the cart_item_desc_ext class
+  for (let i = 0; i < cartRowsToRemove.length; i += 1) {
+    // get the cart_item parent element
+    const cartRow = $($(cartRowsToRemove[i]).parent().parent());
+
+    const snr = cartRow.find('.cart_item_img a').attr('href').split('snr=')[1];
+    const appId = cartRow.attr('data-ds-appid');
+
+    const data = {
+      sessionid: global.sessionId,
+      action: 'remove_line_item',
+      cart: global.shoppingCartGID,
+      snr: `${snr}__cart-remove`,
+      lineitem_gid: cartRow.attr('id').split('cart_row_')[1],
+    };
+
+    const response = await postRequest('https://store.steampowered.com/cart/', data);
+
+    await sleep(50);
+
+    if (response.match(/Your item has been removed/) === null) {
+      logger.error(`Error removing app  (${appId}) from cart`);
+    } else {
+      logger.success(`Successfully removed app (${appId}) from cart`);
+    }
+  }
 };
 
 const forgetCart = async () => {
   global.shoppingCartGID = null;
-  // get our cookies from the browser
 
-  console.log(steamCommunity._request._jar);
+  // eslint-disable-next-line no-underscore-dangle
+  //   steamCommunity._jar.removeCookie('shoppingCartGID', { path: '/', domain: 'store.steampowered.com' });
+  //   removeCookie('shoppingCartGID', { path: '/', domain: 'store.steampowered.com' });
+  // eslint-disable-next-line no-underscore-dangle
+  console.log(steamCommunity._jar);
 };
 
 const finalizeTransaction = async (transactionId) => {
@@ -804,10 +879,8 @@ const initializeTransaction = async (countryCode, cartPage) => {
   }
 
   if (response.transid === undefined) {
-    logger.error('initializeTransaction() Error initializing transaction', response);
+    writeFileSync('./debug/initializeTransactionError.json', JSON.stringify(response));
   }
-
-  logger.log(`initializeTransaction() response: ${JSON.stringify(response)}`);
 
   if (response?.appcausingerror) {
     logger.error('initializeTransaction() Error initializing transaction', response.specificerrortext);
@@ -949,22 +1022,11 @@ const getItemPrice = async (appId, marketHashName, currency) => {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
   }).catch(() => ({ })));
 
-  let price = -1;
-
-  if (typeof response?.success !== 'undefined') {
-    if (!response?.lowest_price) {
-      logger.warn(`Could not get price for ${marketHashName} in ${currency}`, response);
-    }
-
-    price = balanceToAmount(response.lowest_price).amount;
-  } else {
-    const backupPrice = await getItemPriceBackup(appId, marketHashName);
-    if (backupPrice > 0) {
-      price = backupPrice;
-    }
+  if (typeof response?.success !== 'undefined' && typeof response?.lowest_price !== 'undefined') {
+    return balanceToAmount(response?.lowest_price).amount;
   }
 
-  return price;
+  return getItemPriceBackup(appId, marketHashName);
 };
 
 const getInventory = () => new Promise((resolve, reject) => {
@@ -1014,24 +1076,28 @@ const getCardMarketListings = async (settings) => {
       const listings = $('.market_listing_row.market_recent_listing_row');
 
       listings.each((_, listing) => {
-        const listingId = $(listing).attr('id').replace('mylisting_', '');
-        const listingName = $(listing).find('.market_listing_game_name').text();
-        const listingPrice = balanceToAmount($(listing).find('.market_listing_price').text()).amount;
-        const hashName = `${$(listing).find('.market_listing_item_name_link').attr('href').split('-')[0].split('/')[6]}-${$(listing).find('.market_listing_item_name_link').text()}`;
+        try {
+          const listingId = $(listing).attr('id').replace('mylisting_', '');
+          const listingName = $(listing).find('.market_listing_game_name').text();
+          const listingPrice = balanceToAmount($(listing).find('.market_listing_price').text()).amount;
+          const hashName = `${$(listing).find('.market_listing_item_name_link').attr('href').split('-')[0].split('/')[6]}-${$(listing).find('.market_listing_item_name_link').text()}`;
 
-        if (listingName.includes('Card') || listingName.includes('card')) {
-          if (typeof hashName === 'undefined') {
-            logger.error('getCardMarketListings() Error getting card market listings', response);
-          } else {
-            tradingCards.push({
-              listingId,
-              listingName,
-              listingPrice,
-              hashName,
-            });
+          if (listingName.includes('Card') || listingName.includes('card')) {
+            if (typeof hashName === 'undefined') {
+              logger.error('getCardMarketListings() Error getting card market listings', response);
+            } else {
+              tradingCards.push({
+                listingId,
+                listingName,
+                listingPrice,
+                hashName,
+              });
+            }
+
+            bar.update(tradingCards.length);
           }
-
-          bar.update(tradingCards.length);
+        } catch (e) {
+          logger.error(e);
         }
 
         // get the id before the - for example: https://steamcommunity.com/market/listings/753/1109360-Taeko%20Witch%20%28Foil%29
@@ -1078,25 +1144,26 @@ const removeOverpricedItems = async (wallet, config, sellAll = false) => {
 
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
-    format: `Removing Cards | {bar} | {percentage}% | Checked {value}/{total} Market Listings | Removed {removedCount} Listings | Time Elapsed: {duration}s | ETA: {eta}s | Total Price: {price} ${wallet.currency}`,
+    format: `Removing Cards | {bar} | {percentage}% | Checked {value}/{total} Market Listings | Removed {removedCount} Listings | Time Elapsed: {duration}s | ETA: {eta}s | Listed Cards Price: {listedPrice} ${wallet.currency} | Removed Cards Price: {removedPrice} ${wallet.currency}`,
   }, cliProgress.Presets.shades_grey);
-  bar.start(cardsOnMarket.length, 0, { removedCount: 0, duration: 0, price: 0 });
+  bar.start(cardsOnMarket.length, 0, {
+    removedCount: 0, duration: 0, listedPrice: 0, removedPrice: 0,
+  });
 
   const cache = {};
   let removedCount = 0;
-  let totalPrice = 0;
+  let listedPrice = 0;
+  let removedPrice = 0;
   const startTime = moment().valueOf();
 
   for (let i = 0; i < cardsOnMarket.length; i += 1) {
     let price = 0;
-    const PriceWithoutFees = (
-      parseFloat(totalPrice) - (parseFloat(totalPrice) * 0.13043478261)
-    ).toFixed(2);
 
     bar.update(i + 1, {
       removedCount,
       duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
-      price: PriceWithoutFees,
+      removedPrice: removedPrice.toFixed(2),
+      listedPrice: listedPrice.toFixed(2),
     });
 
     if (typeof cache[cardsOnMarket[i].hashName] === 'undefined') {
@@ -1119,9 +1186,10 @@ const removeOverpricedItems = async (wallet, config, sellAll = false) => {
     if (cardsOnMarket[i].listingPrice > price || sellAll) {
       removedCount += 1;
       await removeMarketListing(cardsOnMarket[i].listingId);
+      removedPrice += getPriceWithoutFees(cardsOnMarket[i].listingPrice);
+    } else {
+      listedPrice += getPriceWithoutFees(cardsOnMarket[i].listingPrice);
     }
-
-    totalPrice += cardsOnMarket[i].listingPrice;
   }
 
   bar.stop();
@@ -1146,20 +1214,22 @@ const buyGames = async (config, ownedApps, ownedAppsRealCount, wallet) => {
     const expectedChunkSize = appList.length / ((appList.length * 2) / 100);
     const chunkSize = expectedChunkSize < minChunkSize ? minChunkSize : expectedChunkSize;
 
-    for (let i = 0; i < appList.length; i += chunkSize) {
-      chunks.push(appList.slice(i, i + chunkSize));
-    }
+    // for (let i = 0; i < appList.length; i += chunkSize) {
+    //   chunks.push(appList.slice(i, i + chunkSize));
+    // }
 
-    for (let i = 0; i < chunks.length; i += 1) {
-      // eslint-disable-next-line no-await-in-loop
-      await addGamesToCart(chunks[i]);
+    // for (let i = 0; i < chunks.length; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await addGamesToCart(appList);
 
-      await checkoutCart();
+    await checkoutCart();
 
-      await forgetCart();
+    await clearCartPage();
 
-      await sleep(60);
-    }
+    await forgetCart();
+
+    await sleep(60);
+    // }
   }
 };
 
@@ -1187,7 +1257,7 @@ const sellCards = async (config, wallet) => {
         fixMarketHashName(card.market_hash_name),
         wallet.currency,
       );
-      await sleep(300);
+      await sleep(75);
 
       if (price === -1) {
         // eslint-disable-next-line no-continue

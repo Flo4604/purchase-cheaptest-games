@@ -7,9 +7,9 @@ const EXTRA_OPTIONS = {
     TRADING_CARDS_LIMITED: 1 << 1,
   },
   SELLING: {
-    ALL_TRADING_CARDS: 1 << 0,
-    NORMAL_TRADING_CARDS: 1 << 1,
-    FOIL_TRADING_CARDS: 1 << 2,
+    ALL_TRADING_CARDS: 1 << 2,
+    NORMAL_TRADING_CARDS: 1 << 3,
+    FOIL_TRADING_CARDS: 1 << 4,
   },
 };
 
