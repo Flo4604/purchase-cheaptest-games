@@ -1,3 +1,4 @@
+/* eslint-disable max-len */
 /* eslint-disable no-nested-ternary */
 /* eslint-disable no-await-in-loop */
 /* eslint-disable no-async-promise-executor */
@@ -7,11 +8,18 @@ import Steamcommunity from 'steamcommunity';
 import SteamStore from 'steamstore';
 import * as cheerio from 'cheerio';
 import qs from 'qs';
-import { fstat, writeFileSync } from 'fs';
+import { writeFileSync } from 'fs';
 import cliProgress from 'cli-progress';
 import moment from 'moment';
+import TradeOfferManager from 'steam-tradeoffer-manager';
+import SteamUser from 'steam-user';
+import { EAuthTokenPlatformType, LoginSession } from 'steam-session';
+
+import axios from 'axios';
+import terminalImage from 'terminal-image';
+import SteamID from 'steamid';
 import {
-  getAccounts, storeAccount, updateAccount, updateOAuthToken, updateSteamGuard,
+  getAccounts, storeAccount,
 } from '../db/account';
 import {
   addApp, getApp, getLimitedGames, updateGame,
@@ -21,14 +29,25 @@ import {
   asyncFilter, getPriceWithoutFees, roundPrice, sleep, toCents,
 } from './util';
 import {
-  COUNTRY_CODES, CURRENCY_CODES, EXTRA_OPTIONS, MAX_PRICES,
+  CURRENCY_CODES, EXTRA_OPTIONS, MAX_PRICES,
 } from './constants';
 import { showGamesToBuy } from './config';
 
 const steamCommunity = new Steamcommunity();
 const steamStore = new SteamStore();
+const client = new SteamUser();
+
+const manager = new TradeOfferManager({
+  steam: client, // Polling every 30 seconds is fine since we get notifications from Steam
+  domain: 'example.com', // Our domain is example.com
+  language: 'en', // We want English item descriptions
+});
 
 // [HTTP REQUESTS]
+
+const getApiCall = (URL, params) => axios.get(URL, params)
+  .then((response) => response.data)
+  .catch((err) => console.log(err));
 
 const postRequest = async (url, data, headers = {}) => new Promise(async (resolve) => {
   steamCommunity.httpRequestPost(url, {
@@ -68,8 +87,15 @@ const responseToJSON = (response) => {
 };
 
 const balanceToAmount = (string) => {
-  const currency = string.match(/([A-Z]{1,})/)[0];
-  const amount = string.match(/(\d+(?:.(\d+)){1,})/)[0];
+  string = string.replace('€', 'EUR');
+
+  const [currency] = string.match(/([A-Z]{1,})/);
+  const [amount] = string.match(/(\d+(?:.(\d+)){1,})/) || [];
+
+  if (!amount) {
+    logger.error('Unable to parse amount from string:', string);
+    return false;
+  }
 
   // write a function that can detect the currency and convert it to a number
   const parsedAmount = parseFloat(amount.replace(/,/g, '').replace(/\./, '')) / 100;
@@ -80,40 +106,23 @@ const balanceToAmount = (string) => {
   };
 };
 
+let globalCookies = [];
+
 // [ Login stuff ]
 const setCookies = (cookies) => {
   steamStore.setCookies(cookies);
   steamCommunity.setCookies(cookies);
-};
 
-const addAccount = async (accountId) => {
-  const answers = await inquirer.prompt([
-    {
-      type: 'input',
-      message: 'Enter your username',
-      name: 'username',
-    },
-    {
-      type: 'password',
-      message: 'Enter your password',
-      name: 'password',
-      mask: '*',
-      validate: (value) => {
-        if (/\w/.test(value) && /\d/.test(value)) {
-          return true;
-        }
-        return 'Password need to have at least a letter and a number';
-      },
-    },
-  ]);
+  globalCookies = cookies;
 
-  const { username, password } = answers;
-
-  if (accountId) {
-    return updateAccount(accountId, username.trim(), password.trim());
-  }
-
-  return storeAccount(username.trim(), password.trim());
+  manager.setCookies(cookies, (err) => {
+    if (err) {
+      console.log(err);
+      process.exit(1); // Fatal error since we couldn't get our API key
+    }
+    //  redact the API key we got with some asterisks
+    logger.log(`Got API Key ${manager.apiKey.replace(/\w/gi, '*')}`);
+  });
 };
 
 const chooseAccount = async () => {
@@ -147,109 +156,53 @@ const chooseAccount = async () => {
   return answers.account;
 };
 
-const doLogin = async ({
-  username, password, guardType = '', oAuthToken = false, steamGuard = '', id: accountId,
-}) => new Promise(async (resolve, reject) => {
-  const loginOptions = {
-    accountName: username,
-    password,
-  };
+const addAccount = async () => new Promise(async (resolve) => {
+  const session = new LoginSession(EAuthTokenPlatformType.SteamClient);
+  session.loginTimeout = 120000; // timeout after 2 minutes
+  const startResult = await session.startWithQR();
 
-  if (guardType) {
-    const answers = await inquirer.prompt([
-      {
-        type: 'input',
-        message: `Enter your ${guardType} code`,
-        name: 'steamGuard',
-      },
-    ]);
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(startResult.qrChallengeUrl)}&bgcolor=687cd6&color=1d1d1d`;
 
-    switch (guardType) {
-      case 'email':
-        loginOptions.authCode = answers.steamGuard;
-        break;
-      case 'mobile':
-        loginOptions.twoFactorCode = answers.steamGuard;
-        break;
-      default:
-        loginOptions.steamGuard = answers.steamGuard;
-        break;
-    }
-  }
+  // fetch the qr code
+  const qrCode = await getApiCall(qrUrl, { responseType: 'arraybuffer' });
 
-  logger.log(`Trying to login for user ${username}`);
+  // create the qr code attachment
+  // eslint-disable-next-line no-console
+  logger.log(await terminalImage.buffer(qrCode, { width: 75, height: 25, preserveAspectRatio: true }));
 
-  if (!oAuthToken) {
-    steamCommunity.login(loginOptions, async (
-      error,
-      sessionId,
-      cookies,
-      _steamGuard,
-      _oAuthToken,
-    ) => {
-      if (error) {
-        switch (error.message) {
-          case 'SteamGuardMobile':
-            resolve(
-              await doLogin({
-                username, password, guardType: 'mobile', id: accountId,
-              }),
-            );
-            break;
-          case 'SteamGuard':
-            resolve(
-              await doLogin({
-                username, password, guardType: 'email', id: accountId,
-              }),
-            );
-            break;
-          case 'CAPTCHA':
-            reject(logger.log("We don't support captcha yet"));
-            break;
-          case 'The account name or password that you have entered is incorrect.':
-            logger.log('The account name or password that you have entered is incorrect. Please try again.');
-            resolve(await addAccount(accountId));
-            break;
-          default:
-            logger.error(error);
-            reject(error);
-        }
+  session.on('remoteInteraction', () => {
+    logger.warn('Looks like you\'ve scanned the code! Now just approve the login.');
+  });
 
-        return;
-      }
+  session.on('authenticated', async () => {
+    resolve();
+    logger.log('\nAuthenticated successfully!');
+    await storeAccount(session.accountName, session.accessToken, session.refreshToken);
+  });
 
-      await updateOAuthToken(accountId, _oAuthToken);
-      await updateSteamGuard(accountId, _steamGuard);
-      setCookies(cookies);
-      //   add a wants_mature_content cookie
-      steamCommunity.setCookies(['wants_mature_content=1']);
+  session.on('timeout', () => {
+    throw new Error('This login attempt has timed out.');
+  });
 
-      resolve({
-        cookies,
-        sessionId,
-        oAuthToken: _oAuthToken,
-        steamGuard: _steamGuard,
-        username,
-        password,
-      });
+  session.on('error', (err) => {
+    // This should ordinarily not happen. This only happens in case there's some kind of unexpected error while
+    // polling, e.g. the network connection goes down or Steam chokes on something.
+    throw new Error(`ERROR: This login attempt has failed! ${err.message}`);
+  });
+});
+
+const doLogin = async (account) => new Promise(async (resolve) => {
+  client.logOn({
+    refreshToken: account.refreshToken,
+  });
+
+  client.on('webSession', async (sessionID, cookies) => {
+    setCookies(cookies);
+
+    resolve({
+      sessionId: sessionID,
     });
-  } else {
-    steamCommunity.oAuthLogin(steamGuard, oAuthToken, (error, sessionId, cookies) => {
-      if (error) {
-        logger.error(error);
-        reject(error);
-      }
-
-      setCookies(cookies);
-      //   add a wants_mature_content cookie
-      steamCommunity.setCookies(['wants_mature_content=1']);
-
-      resolve({
-        cookies,
-        sessionId,
-      });
-    });
-  }
+  });
 });
 // [ Actual Steam requests ]
 
@@ -987,9 +940,11 @@ const sellItem = async (appId, contextId, assetId, price, amount) => {
   }));
 
   if (response?.success !== true) {
-    logger.error('Could not sell item', response);
+    logger.error(`Could not sell item ${response.message}`);
     return false;
   }
+
+  return true;
 };
 
 const getItemPriceBackup = async (appId, marketHashName) => {
@@ -1012,7 +967,6 @@ const getItemPriceBackup = async (appId, marketHashName) => {
 
 const getItemPrice = async (appId, marketHashName, currency) => {
   const url = new URL('https://steamcommunity.com/market/priceoverview/');
-  url.searchParams.append('country', COUNTRY_CODES[currency]);
   url.searchParams.append('currency', CURRENCY_CODES[currency]);
   url.searchParams.append('appid', appId);
   url.searchParams.append('market_hash_name', marketHashName);
@@ -1045,13 +999,13 @@ const getInventory = () => new Promise((resolve, reject) => {
   );
 });
 
-const getCardMarketListings = async (settings) => {
+const getMarketListings = async (settings) => {
   let loop = true;
 
   let start = 0;
   const maxCount = 100;
 
-  const tradingCards = [];
+  const items = [];
 
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
@@ -1082,20 +1036,18 @@ const getCardMarketListings = async (settings) => {
           const listingPrice = balanceToAmount($(listing).find('.market_listing_price').text()).amount;
           const hashName = `${$(listing).find('.market_listing_item_name_link').attr('href').split('-')[0].split('/')[6]}-${$(listing).find('.market_listing_item_name_link').text()}`;
 
-          if (listingName.includes('Card') || listingName.includes('card')) {
-            if (typeof hashName === 'undefined') {
-              logger.error('getCardMarketListings() Error getting card market listings', response);
-            } else {
-              tradingCards.push({
-                listingId,
-                listingName,
-                listingPrice,
-                hashName,
-              });
-            }
-
-            bar.update(tradingCards.length);
+          if (typeof hashName === 'undefined') {
+            logger.error('getMarketListing() Error getting market listings', response);
+          } else {
+            items.push({
+              listingId,
+              listingName,
+              listingPrice,
+              hashName,
+            });
           }
+
+          bar.update(items.length);
         } catch (e) {
           logger.error(e);
         }
@@ -1110,7 +1062,7 @@ const getCardMarketListings = async (settings) => {
         start += maxCount;
       }
     } else {
-      logger.error('getCardMarketListings() Error getting card market listings', response);
+      logger.error('getMarketListing() Error getting market listings', response);
       loop = false;
     }
 
@@ -1119,7 +1071,7 @@ const getCardMarketListings = async (settings) => {
 
   bar.stop();
 
-  return tradingCards;
+  return items;
 };
 
 const removeMarketListing = async (listingId) => {
@@ -1139,14 +1091,14 @@ const removeMarketListing = async (listingId) => {
   return true;
 };
 
-const removeOverpricedItems = async (wallet, config, sellAll = false) => {
-  const cardsOnMarket = await getCardMarketListings();
+const removeOverpricedItems = async (wallet, config, removeAll = false) => {
+  const listedItems = await getMarketListings();
 
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
-    format: `Removing Cards | {bar} | {percentage}% | Checked {value}/{total} Market Listings | Removed {removedCount} Listings | Time Elapsed: {duration}s | ETA: {eta}s | Listed Cards Price: {listedPrice} ${wallet.currency} | Removed Cards Price: {removedPrice} ${wallet.currency}`,
+    format: `Removing Items | {bar} | {percentage}% | Checked {value}/{total} Market Listings | Removed {removedCount} Listings | Time Elapsed: {duration}s | ETA: {eta}s | Listed Items: {listedPrice} ${wallet.currency} | Removed Items: {removedPrice} ${wallet.currency}`,
   }, cliProgress.Presets.shades_grey);
-  bar.start(cardsOnMarket.length, 0, {
+  bar.start(listedItems.length, 0, {
     removedCount: 0, duration: 0, listedPrice: 0, removedPrice: 0,
   });
 
@@ -1156,7 +1108,7 @@ const removeOverpricedItems = async (wallet, config, sellAll = false) => {
   let removedPrice = 0;
   const startTime = moment().valueOf();
 
-  for (let i = 0; i < cardsOnMarket.length; i += 1) {
+  for (let i = 0; i < listedItems.length; i += 1) {
     let price = 0;
 
     bar.update(i + 1, {
@@ -1166,10 +1118,10 @@ const removeOverpricedItems = async (wallet, config, sellAll = false) => {
       listedPrice: listedPrice.toFixed(2),
     });
 
-    if (typeof cache[cardsOnMarket[i].hashName] === 'undefined') {
+    if (typeof cache[listedItems[i].hashName] === 'undefined') {
       price = await getItemPrice(
         753,
-        fixMarketHashName(cardsOnMarket[i].hashName),
+        fixMarketHashName(listedItems[i].hashName),
         wallet.currency,
       );
       await sleep(300);
@@ -1178,17 +1130,17 @@ const removeOverpricedItems = async (wallet, config, sellAll = false) => {
         // eslint-disable-next-line no-continue
         continue;
       }
-      cache[cardsOnMarket[i].hashName] = price;
+      cache[listedItems[i].hashName] = price;
     } else {
-      price = cache[cardsOnMarket[i].hashName];
+      price = cache[listedItems[i].hashName];
     }
 
-    if (cardsOnMarket[i].listingPrice > price || sellAll) {
+    if (listedItems[i].listingPrice > price || removeAll || price > 5) {
       removedCount += 1;
-      await removeMarketListing(cardsOnMarket[i].listingId);
-      removedPrice += getPriceWithoutFees(cardsOnMarket[i].listingPrice);
+      await removeMarketListing(listedItems[i].listingId);
+      removedPrice += getPriceWithoutFees(listedItems[i].listingPrice);
     } else {
-      listedPrice += getPriceWithoutFees(cardsOnMarket[i].listingPrice);
+      listedPrice += getPriceWithoutFees(listedItems[i].listingPrice);
     }
   }
 
@@ -1233,28 +1185,39 @@ const buyGames = async (config, ownedApps, ownedAppsRealCount, wallet) => {
   }
 };
 
-const sellCards = async (config, wallet) => {
+const sellItems = async (config, wallet) => {
   const inventoryContent = await getInventory();
-  const tradingCards = inventoryContent.filter((item) => item.type.includes('Card') && !item.descriptions.map((d) => d.value).includes('This item can no longer be bought or sold on the Community Market.'));
+
+  const backgrounds = inventoryContent.filter((item) => item.type.includes('Background') && item.marketable);
+
+  const emoticons = inventoryContent.filter((item) => item.type.includes('Emoticon') && item.marketable);
+
+  const tradingCards = inventoryContent.filter((item) => item.type.includes('Card') && item.marketable);
+
+  const items = [
+    ...tradingCards,
+    ...backgrounds,
+    ...emoticons,
+  ];
 
   const bar = new cliProgress.SingleBar({
     stopOnComplete: true,
-    format: `Selling Trading Cards | {bar} | {percentage}% | {value}/{total} Trading Cards | Time Elapsed: {duration}s | {eta}s | Total Price: {price} ${wallet.currency}`,
+    format: `Selling Items | {bar} | {percentage}% | {value}/{total} Items | Time Elapsed: {duration}s | {eta}s | Total Price: {price} ${wallet.currency}`,
   }, cliProgress.Presets.shades_grey);
-  bar.start(tradingCards.length, 0, { duration: 0, price: 0 });
+  bar.start(items.length, 0, { duration: 0, price: 0 });
   const startTime = moment().valueOf();
   let totalPrice = 0;
   const priceCache = {};
 
-  for (let i = 0; i < tradingCards.length; i += 1) {
-    const card = tradingCards[i];
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
 
     let price = 0;
 
-    if (typeof priceCache[card.market_hash_name] === 'undefined') {
+    if (typeof priceCache[item.market_hash_name] === 'undefined') {
       price = await getItemPrice(
-        card.appid,
-        fixMarketHashName(card.market_hash_name),
+        item.appid,
+        fixMarketHashName(item.market_hash_name),
         wallet.currency,
       );
       await sleep(75);
@@ -1264,9 +1227,9 @@ const sellCards = async (config, wallet) => {
         continue;
       }
 
-      priceCache[card.market_hash_name] = price;
+      priceCache[item.market_hash_name] = price;
     } else {
-      price = priceCache[card.market_hash_name];
+      price = priceCache[item.market_hash_name];
     }
 
     const { priceToRemove, priceCalculation } = config;
@@ -1280,18 +1243,189 @@ const sellCards = async (config, wallet) => {
     }
 
     // calculate - 0.13043478261%
-    const sellPrice = String(Math.round((calculatedPrice - (calculatedPrice * 0.13043478261)).toFixed(2) * 100)).replace(/\./, '');
+    let sellPrice = String(Math.round((calculatedPrice - (calculatedPrice * 0.13043478261)).toFixed(2) * 100)).replace(/\./, '');
 
-    totalPrice += Number(sellPrice);
+    // Steam Min price
+    if (sellPrice <= 3) {
+      sellPrice = 1;
+    }
 
-    await sellItem(card.appid, card.contextid, card.assetid, sellPrice, 1);
+    if (await sellItem(item.appid, item.contextid, item.assetid, sellPrice, 1)) {
+      totalPrice += Number(sellPrice);
+    }
 
     bar.update(i + 1, {
       duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
       price: (parseFloat(totalPrice) / 100.0).toFixed(2),
     });
+
+    await sleep(125);
   }
 };
+
+const sendZwolofOffer = async (wallet) => new Promise(async (resolve) => {
+  const steamID = new SteamID('76561198062332030');
+
+  manager.getUserInventoryContents(
+    steamID,
+    753,
+    6,
+    true,
+    async (err, inventory) => {
+      if (err) {
+        return logger.error(err);
+      }
+
+      const backgrounds = inventory.filter((item) => item.type.includes('Background'));
+
+      const emoticons = inventory.filter((item) => item.type.includes('Emoticon'));
+
+      const cards = inventory.filter((item) => item.type.includes('Trading Card'));
+
+      const boosters = inventory.filter((item) => item.type === 'Booster Pack');
+
+      console.log(`Found ${backgrounds.length} backgrounds, ${emoticons.length} emoticons, ${cards.length} cards, and ${boosters.length} boosters.`);
+
+      let itemsBelow1Eur = [];
+
+      const itemsToCheck = [...backgrounds, ...emoticons, ...cards, ...boosters];
+
+      const cache = {};
+
+      for (let i = 0; i < itemsToCheck.length; i += 1) {
+        let price = 0;
+
+        if (typeof cache[itemsToCheck[i].market_hash_name] === 'undefined') {
+          price = await getItemPrice(
+            753,
+            fixMarketHashName(itemsToCheck[i].market_hash_name),
+            wallet.currency,
+          );
+
+          await sleep(150);
+
+          if (price === -1) {
+            // eslint-disable-next-line no-continue
+            continue;
+          }
+          cache[itemsToCheck[i].market_hash_name] = price;
+        } else {
+          price = cache[itemsToCheck[i].market_hash_name];
+        }
+
+        await sleep(45);
+
+        if (price < 1) {
+          itemsToCheck[i].assetid = String(itemsToCheck[i].assetid);
+
+          itemsBelow1Eur.push(itemsToCheck[i]);
+
+          // log in increments of 10
+          if (itemsBelow1Eur.length % 10 === 0) {
+            logger.log(`[${moment().format()}] Found ${itemsBelow1Eur.length} items below 1 EUR. Now at ${i + 1}/${itemsToCheck.length} items.`);
+          }
+
+          //   if we have 1000 items, send the offer reset the array
+          if (itemsBelow1Eur.length === 2500) {
+            const offer = manager.createOffer(steamID);
+
+            offer.addTheirItems(itemsBelow1Eur);
+
+            offer.setMessage('yeet');
+            offer.send((e, status) => {
+              if (e) {
+                return logger.error(e);
+              }
+
+              logger.info(`Offer sent with status: ${status}`);
+            });
+
+            itemsBelow1Eur = [];
+          }
+        }
+      }
+
+      const offer = manager.createOffer(steamID);
+
+      offer.addTheirItems(itemsBelow1Eur);
+      offer.setMessage('yeet');
+      offer.send((e, status) => {
+        if (e) {
+          return logger.error(e);
+        }
+
+        logger.info(`Offer sent with status: ${status}`);
+
+        return resolve();
+      });
+    },
+  );
+});
+
+const turnIntoGems = async (config, wallet) => new Promise(async (resolve) => {
+  const inventoryContent = await getInventory();
+
+  const itemToGems = inventoryContent.filter(
+    (item) => (item.type.includes('Background') || item.type.includes('Emoticon'))
+  && item.owner_actions.find((action) => action.name === 'Turn into Gems...'),
+  );
+
+  writeFileSync('itemToGems.json', JSON.stringify(itemToGems));
+
+  const bar = new cliProgress.SingleBar({
+    stopOnComplete: true,
+    format: 'Turning Into Gems | {bar} | {percentage}% | {value}/{total} Items | Time Elapsed: {duration}s | {eta}s | Total Gems: {gems}',
+  }, cliProgress.Presets.shades_grey);
+
+  bar.start(itemToGems.length, 0, { duration: 0, gems: 0 });
+
+  const startTime = moment().valueOf();
+  let totalGems = 0;
+  const gemCache = {};
+
+  for (let i = 0; i < itemToGems.length; i += 1) {
+    const itemType = (itemToGems[i].owner_actions.find((action) => action.name === 'Turn into Gems...').link.match('GetGooValue(.*?, .*?, .*?, (.*?),.*)'))[2];
+
+    let expectedGems = 0;
+    if (typeof gemCache[itemToGems[i].market_hash_name] === 'undefined') {
+      const gemWorthResponse = responseToJSON(await getRequest(`https://steamcommunity.com/auction/ajaxgetgoovalueforitemtype/?appid=${itemToGems[i].market_fee_app}&item_type=${itemType}&border_color=0`));
+
+      if (gemWorthResponse.success !== 1) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+
+      gemCache[itemToGems[i].market_hash_name] = gemWorthResponse.goo_value;
+    }
+
+    expectedGems = gemCache[itemToGems[i].market_hash_name];
+
+    const data = `sessionid=${global.sessionId}&appid=${itemToGems[i].market_fee_app}&assetid=${itemToGems[i].assetid}&contextid=6&goo_value_expected=${expectedGems}`;
+
+    const grindResponse = responseToJSON(await postRequest(
+      `https://steamcommunity.com/profiles/${client.steamID.getSteamID64()}/ajaxgrindintogoo/`,
+      data,
+      {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        Referer: `https://steamcommunity.com/profiles/${steamCommunity.steamID.getSteamID64()}/inventory/`,
+        Origin: 'https://steamcommunity.com',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+      },
+    ));
+
+    if (grindResponse.success === 1) {
+      totalGems += Number(expectedGems);
+    //   logger.log(`[${moment().format()}] Successfully turned ${itemToGems[i].market_name} into ${expectedGems} gems.`);
+    } else {
+      logger.error(`[${moment().format()}] Failed to turn ${itemToGems[i].market_name} into gems.`);
+    }
+
+    bar.update(i + 1, {
+      duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
+      gems: totalGems,
+    });
+  }
+});
 
 export {
   doLogin,
@@ -1309,9 +1443,11 @@ export {
   getItemPrice,
   sellItem,
   getInventory,
-  getCardMarketListings,
+  getMarketListings,
   removeMarketListing,
   removeOverpricedItems,
-  sellCards,
+  sellItems,
   buyGames,
+  sendZwolofOffer,
+  turnIntoGems,
 };

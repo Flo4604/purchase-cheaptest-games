@@ -1,8 +1,6 @@
 /* eslint-disable no-await-in-loop */
-import terminalImage from 'terminal-image';
 import {
   addAccount,
-  BADGES as badges,
   buyGames,
   chooseAccount,
   doLogin,
@@ -10,8 +8,10 @@ import {
   getOwnedAppsCount,
   getWalletBalance,
   removeOverpricedItems,
-  sellCards,
+  sellItems,
   setupConfig,
+  sendZwolofOffer,
+  turnIntoGems,
 } from './helper';
 import { getAccount } from './db/account';
 import logger from './helper/logger';
@@ -31,13 +31,13 @@ const selectAccount = async () => {
     }
   } while (accountId === -1 || accountId === 0);
 
-  return getAccount(accountId);
+  return accountId;
 };
 
 // eslint-disable-next-line no-constant-condition
 while (true) {
   if (showAccountSelection) {
-    account = await selectAccount();
+    account = await getAccount(await selectAccount());
 
     const {
       sessionId,
@@ -54,7 +54,7 @@ while (true) {
   if (config.mode === 'cleanup') {
     await removeOverpricedItems(wallet, config);
   } else if (config.mode === 'sell') {
-    await sellCards(config, wallet);
+    await sellItems(config, wallet);
   } else if (config.mode === 'buy') {
     await buyGames(config, ownedApps, ownedAppsRealCount, wallet);
   } else if (config.mode === 'cleanAll') {
@@ -64,6 +64,10 @@ while (true) {
     showAccountSelection = true;
     // eslint-disable-next-line no-continue
     continue;
+  } else if (config.mode === 'turnIntoGems') {
+    await turnIntoGems(config, wallet);
+  } else if (config.mode === 'custom') {
+    await sendZwolofOffer(wallet);
   } else if (config.mode === 'exit') {
     break;
   }

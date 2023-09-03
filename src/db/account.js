@@ -10,28 +10,11 @@ const getAccount = async (id) => prisma.account.findFirst({
   },
 });
 
-const storeAccount = async (username, password) => prisma.account.create({
+const storeAccount = async (username, accessToken, refreshToken) => prisma.account.create({
   data: {
     username,
-    password,
-  },
-});
-
-const updateOAuthToken = async (id, oAuthToken) => prisma.account.update({
-  where: {
-    id,
-  },
-  data: {
-    oAuthToken,
-  },
-});
-
-const updateSteamGuard = async (id, steamGuard) => prisma.account.update({
-  where: {
-    id,
-  },
-  data: {
-    steamGuard,
+    accessToken,
+    refreshToken,
   },
 });
 
@@ -67,8 +50,6 @@ export {
   getAccounts,
   getAccount,
   storeAccount,
-  updateOAuthToken,
   updateConfig,
   updateAccount,
-  updateSteamGuard,
 };

@@ -16,16 +16,14 @@ const EXTRA_OPTIONS = {
 const MAX_PRICES = {
   ARS: 840,
   TL: 60,
+  EUR: 60,
+
 };
 
 const CURRENCY_CODES = {
   ARS: 34,
   TL: 17,
-};
-
-const COUNTRY_CODES = {
-  ARS: 'AR',
-  TL: 'TR',
+  EUR: 3,
 };
 
 const BADGES = [1, 5, 10, 25, 50, 100, 250, 500, 1000];
@@ -50,5 +48,4 @@ export {
   TRANSLATION,
   MAX_PRICES,
   CURRENCY_CODES,
-  COUNTRY_CODES,
 };

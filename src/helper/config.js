@@ -96,6 +96,60 @@ const sellChoices = async () => {
   };
 };
 
+const gemChoices = async () => {
+  const extraOptions = await inquirer.prompt([
+    {
+      type: 'checkbox',
+      message: 'Choose extra options',
+      name: 'options',
+      choices: Object.entries(EXTRA_OPTIONS.SELLING).map(
+        ([key, value]) => ({
+          name: TRANSLATION[key],
+          value,
+          checked: value === EXTRA_OPTIONS.SELLING.ALL_TRADING_CARDS,
+        }),
+      ),
+    }]);
+
+  // eslint-disable-next-line no-bitwise
+  const sellOptionsFlag = extraOptions.options.reduce((a, b) => a | b, 0);
+
+  const priceCalculation = await inquirer.prompt([
+    {
+      type: 'list',
+      message: 'Choose how the script should calculate the price',
+      name: 'priceCalculation',
+      choices: [
+        {
+          name: 'Remove a fixed amount',
+          value: 'fixed',
+        },
+        {
+          name: 'Remove a percentage',
+          value: 'percentage',
+        },
+      ],
+    },
+  ]);
+
+  const priceToRemoveAnswer = await inquirer.prompt([
+    {
+      type: 'input',
+      message: 'How much should be removed from the price?',
+      name: 'priceToRemove',
+      default: priceCalculation.priceCalculation === 'fixed' ? 0.03 : 1,
+      validate: (value) => (Number.isNaN(value) ? 'Please enter a valid number' : true),
+    },
+  ]);
+
+  return {
+    mode: 'sell',
+    sellOptionsFlag,
+    priceToRemove: priceToRemoveAnswer.priceToRemove,
+    priceCalculation: priceCalculation.priceCalculation,
+  };
+};
+
 const buyChoices = async (account, wallet, ownedGameCount) => {
   const answers = await inquirer.prompt([
     {
@@ -197,8 +251,6 @@ const buyChoices = async (account, wallet, ownedGameCount) => {
   // eslint-disable-next-line no-bitwise
   const priceOptionsFlag = extraOptions.options.reduce((a, b) => a | b, 0);
 
-  console.log(priceOptionsFlag);
-
   if (answers.usage !== 'preview' && await confirm('Do you want to save these settings?')) {
     await updateConfig(account.id, limit, answers.usage, maxPrice.maxPrice, priceOptionsFlag);
   }
@@ -254,16 +306,24 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
             value: 'edit',
           },
           {
-            name: 'Sell Trading Cards',
+            name: 'Sell Items',
             value: 'sell',
           },
           {
-            name: 'Clean up Trading Card Listings',
+            name: 'Clean up Market Listings',
             value: 'cleanup',
           },
           {
-            name: 'Remove All Trading Card Listings',
+            name: 'Remove Listings',
             value: 'cleanAll',
+          },
+          {
+            name: 'Turn everything into gems',
+            value: 'turnIntoGems',
+          },
+          {
+            name: 'Custom',
+            value: 'custom',
           },
           {
             name: 'Exit',
@@ -294,6 +354,10 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
     if (answers.usage === 'edit') {
       return buyChoices(account, wallet, ownedGameCount);
     }
+
+    // if (answers.usage === 'turnIntoGems') {
+    //   return gemChoices(account, wallet);
+    // }
 
     return {
       mode: answers.usage,
