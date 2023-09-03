@@ -11,9 +11,8 @@ model Account {
   id Int @id @unique @default(autoincrement())
 
   username   String  @unique
-  password   String
-  oAuthToken String? @default("")
-  steamGuard String? @default("")
+  accessToken String
+  refreshToken String
 
   limit       String @default("0")
   usage       String @default("max")
