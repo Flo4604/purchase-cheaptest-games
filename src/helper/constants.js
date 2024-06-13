@@ -17,7 +17,7 @@ const MAX_PRICES = {
   ARS: 840,
   TL: 60,
   EUR: 60,
-  IDR: 10,
+  IDR: 540_000,
 };
 
 const CURRENCY_CODES = {
