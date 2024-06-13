@@ -1,13 +1,10 @@
-import consola from 'consola';
+import { createConsola } from "consola";
 
-const logger = consola.create({
-  // level: 4,
-  reporters: [
-    new consola.FancyReporter(),
-  ],
-  defaults: {
-    additionalColor: 'white',
-  },
+const logger = createConsola({
+	fancy: true,
+	defaults: {
+		additionalColor: "white",
+	},
 });
 
 export default logger;
