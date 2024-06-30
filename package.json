@@ -1,30 +1,38 @@
 {
-    "dependencies": {
-        "@prisma/client": "^5.15.0",
-        "axios": "^1.7.2",
-        "cheerio": "1.0.0-rc.12",
-        "cli-progress": "^3.12.0",
-        "consola": "^3.2.3",
-        "inquirer": "^9.2.23",
-        "inquirer-number-plus": "^1.0.0",
-        "moment": "^2.30.1",
-        "qs": "^6.12.1",
-        "steam-session": "^1.7.2",
-        "steam-tradeoffer-manager": "^2.11.4",
-        "steam-user": "^5.0.10",
-        "steamcommunity": "^3.48.3",
-        "steamid": "^2.0.0",
-        "steamstore": "^2.3.0",
-        "terminal-image": "^2.0.0"
-    },
-    "type": "module",
-    "devDependencies": {
-        "@biomejs/biome": "1.8.1",
-        "prisma": "^5.15.0"
-    },
-    "scripts": {
-        "setup": "bunx prisma generate && bunx prisma db push",
-        "start": "bun src/index.js",
-        "dbc": "bunx prisma format && bunx prisma db push && bunx prisma generate"
-    }
+  "dependencies": {
+    "@prisma/client": "^5.16.1",
+    "axios": "^1.7.2",
+    "cheerio": "1.0.0-rc.12",
+    "cli-progress": "^3.12.0",
+    "consola": "^3.2.3",
+    "inquirer": "^9.3.1",
+    "inquirer-number-plus": "^1.0.0",
+    "moment": "^2.30.1",
+    "qs": "^6.12.1",
+    "steam-session": "^1.7.2",
+    "steam-tradeoffer-manager": "^2.11.4",
+    "steam-user": "^5.0.10",
+    "steamcommunity": "^3.48.3",
+    "steamid": "^2.0.0",
+    "steamstore": "^2.3.0",
+    "terminal-image": "^2.0.0",
+    "typescript": "^5.5.2"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@biomejs/biome": "1.8.3",
+    "prisma": "^5.16.1"
+  },
+  "scripts": {
+    "setup": "bunx prisma generate && bunx prisma db push",
+    "start": "node --experimental-specifier-resolution=node src/index.js",
+    "dbc": "bunx prisma format && bunx prisma db push && bunx prisma generate"
+  },
+  "trustedDependencies": [
+    "@biomejs/biome",
+    "@prisma/client",
+    "@prisma/engines",
+    "prisma",
+    "steam-session"
+  ]
 }
