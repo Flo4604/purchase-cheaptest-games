@@ -41,6 +41,8 @@ const manager = new TradeOfferManager({
   language: "en", // We want English item descriptions
 });
 
+let countryCode = "";
+
 // [HTTP REQUESTS]
 
 const getApiCall = (URL, params) =>
@@ -358,6 +360,12 @@ async function getAppDetails(app, forceUrl = false) {
   // check for a a element with a view_product_page_btn id
   if ($("#view_product_page_btn").length > 0) {
     return getAppDetails(app, await bypassMaturityCheck(appId, appPage));
+  }
+
+  if (!countryCode) {
+    const config = $("#application_config").first();
+    const configData = config.attr("data-config");
+    countryCode = JSON.parse(configData).COUNTRY;
   }
 
   const gameElements = $(".game_area_purchase_game_wrapper").toArray();
@@ -753,8 +761,6 @@ const addGamesToCart = async (apps) => {
 
   bar.start(apps.length, 1);
 
-  const userCountry = "DE";
-
   const payload = {
     user_country: userCountry,
     items: apps.map((app) => ({ packageid: app.subId })),
@@ -975,8 +981,6 @@ const getFinalPrice = async (transactionId) => {
 };
 
 const checkoutCart = async () => {
-  const countryCode = "DE";
-
   const transactionId = await initializeTransaction(countryCode);
 
   if (!transactionId) return false;
@@ -1324,11 +1328,7 @@ const buyGames = async (config, ownedApps, ownedAppsRealCount, wallet) => {
 
     await checkoutCart();
 
-    // await clearCartPage();
-
-    // await forgetCart();
-
-    // await sleep(60);
+    await forgetCart();
   }
 };
 
