@@ -201,7 +201,7 @@ const buyChoices = async (account, wallet, ownedGameCount) => {
         message: `Which balance amount would you like to spend? (in ${wallet.currency})`,
         name: "amount",
         validate: (value) => {
-          if (!/\d/.test(value)) return "Please enter a number";
+          if (Number.isNaN(Number(value))) return "Please enter a number";
 
           if (Number(value) > wallet.balance)
             return `You cant spend more than ${wallet.balance} ${wallet.currency}`;

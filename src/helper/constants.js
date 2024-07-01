@@ -17,14 +17,14 @@ const MAX_PRICES = {
   ARS: 840,
   TL: 60,
   EUR: 60,
-  IDR: 540_000,
+  R: 540_000,
 };
 
 const CURRENCY_CODES = {
   ARS: 34,
   TL: 17,
   EUR: 3,
-  IDR: 10,
+  R: 10,
 };
 
 const BADGES = [1, 5, 10, 25, 50, 100, 250, 500, 1000];
