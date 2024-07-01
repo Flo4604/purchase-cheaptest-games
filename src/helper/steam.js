@@ -291,6 +291,9 @@ const bypassMaturityCheck = async (appId, appPage) => {
       ageMonth: "January",
       ageYear: 1990,
     },
+    {
+      Cookie: globalCookies.join("; "),
+    },
   );
 
   try {
