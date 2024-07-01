@@ -129,6 +129,12 @@ let globalCookies = [];
 // [ Login stuff ]
 const setCookies = (cookies) => {
   steamStore.setCookies(cookies);
+
+  cookies.push(
+    "wants_mature_content=1",
+    "lastagecheckage=1-January-2000",
+    "birthtime=946681201",
+  );
   steamCommunity.setCookies(cookies);
 
   manager.setCookies(cookies, (err) => {
@@ -282,65 +288,6 @@ const getWalletBalance = async () =>
     });
   });
 
-const bypassMaturityCheck = async (appId, appPage) => {
-  let ageResponse = await postRequest(
-    `https://store.steampowered.com/agecheckset/app/${appId}`,
-    {
-      sessionid: global.sessionId,
-      ageDay: 1,
-      ageMonth: "January",
-      ageYear: 1990,
-    },
-    {
-      Cookie: globalCookies.join("; "),
-    },
-  );
-
-  try {
-    ageResponse = JSON.parse(ageResponse);
-  } catch (error) {
-    logger.error(`JSON parsing error`, error);
-  }
-
-  // regex get the value of what docuemnt.location is being set to in the response
-  const redirectUrl = appPage
-    .match(/document\.location = "(.*)";/)[0]
-    .split("= ")[1]
-    .replace(/"|;/g, "")
-    .replace(/\\/g, "");
-
-  switch (ageResponse.success) {
-    case 1:
-      steamCommunity.setCookies(["wants_mature_content=1"]);
-      // success
-      break;
-
-    case 24:
-    case 15:
-      logger.error(
-        `bypassMaturityCheck():15- Error bypassing maturity check for ${appId}`,
-        ageResponse,
-      );
-      break;
-
-    case 2:
-      logger.error(
-        `bypassMaturityCheck():2 - Error bypassing maturity check for ${appId}`,
-        ageResponse,
-      );
-      break;
-    default:
-      logger.log(
-        `bypassMaturityCheck():default - Error bypassing maturity check for ${appId}`,
-        ageResponse,
-      );
-
-      break;
-  }
-
-  return redirectUrl;
-};
-
 async function getAppDetails(app, forceUrl = false) {
   const { appId, isBundle = false, includedApps = undefined, price } = app;
 
@@ -359,11 +306,6 @@ async function getAppDetails(app, forceUrl = false) {
   const appPage = await getRequest(url);
 
   const $ = cheerio.load(appPage);
-
-  // check for a a element with a view_product_page_btn id
-  if ($("#view_product_page_btn").length > 0) {
-    return getAppDetails(app, await bypassMaturityCheck(appId, appPage));
-  }
 
   if (!countryCode) {
     const config = $("#application_config").first();
