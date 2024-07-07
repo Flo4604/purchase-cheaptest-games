@@ -320,6 +320,12 @@ async function getAppDetails(app, forceUrl = false) {
     return false;
   }
 
+  const requiresOther = $(".game_area_dlc_bubble").toArray();
+  if (requiresOther.length > 0) {
+    logger.error(`getAppDetails(): Skipped due to requirements: ${appId}`);
+    return false;
+  }
+
   const gameElement = $(
     gameElements.find((el) => {
       const element = $(el);
