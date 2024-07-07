@@ -713,7 +713,7 @@ const addGamesToCart = async (apps) => {
   bar.start(apps.length, 1);
 
   const payload = {
-    user_country: userCountry,
+    user_country: countryCode,
     items: apps.map((app) => ({ packageid: app.subId })),
     navdata: {
       domain: "store.steampowered.com",
@@ -722,7 +722,7 @@ const addGamesToCart = async (apps) => {
       submethod: "",
       feature: "spotlight",
       depth: 1,
-      countrycode: userCountry,
+      countrycode: countryCode,
       webkey: 0,
       is_client: false,
       curator_data: {
