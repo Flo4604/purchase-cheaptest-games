@@ -13,6 +13,7 @@ import {
   sendZwolofOffer,
   turnIntoGems,
   redeemApps,
+  getAppDetails,
 } from "./helper";
 import { getAccount } from "./db/account";
 import logger from "./helper/logger";

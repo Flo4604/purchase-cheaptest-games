@@ -546,6 +546,8 @@ const loadCheapestGames = async (
     // filter out empty arrays
     foundApps = foundApps.filter((app) => app);
 
+    foundApps = foundApps.filter((app) => ![42180, 42140].includes(app.appId));
+
     const resultCount = foundApps.length;
 
     // check if more than 50% of the games are over the limit
@@ -1616,4 +1618,5 @@ export {
   sendZwolofOffer,
   redeemApps,
   turnIntoGems,
+  getAppDetails,
 };
