@@ -546,8 +546,6 @@ const loadCheapestGames = async (
     // filter out empty arrays
     foundApps = foundApps.filter((app) => app);
 
-    foundApps = foundApps.filter((app) => ![42180, 42140].includes(app.appId));
-
     const resultCount = foundApps.length;
 
     // check if more than 50% of the games are over the limit
@@ -578,6 +576,10 @@ const loadCheapestGames = async (
       // check if the app is owned
 
       if (ownedApps.includes(app.id) || ownedApps.includes(app.subId)) {
+        return false;
+      }
+
+      if ([42180, 42140].includes(Number(app.appId))) {
         return false;
       }
 
