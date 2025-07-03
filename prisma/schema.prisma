@@ -1,49 +1,50 @@
 generator client {
-  provider = "prisma-client-js"
+    provider      = "prisma-client-js"
+    binaryTargets = ["native", "windows"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./db.sqlite"
+    provider = "sqlite"
+    url      = "file:./db.sqlite"
 }
 
 model Account {
-  id Int @id @unique @default(autoincrement())
+    id Int @id @unique @default(autoincrement())
 
-  username   String  @unique
-  accessToken String
-  refreshToken String
+    username     String @unique
+    accessToken  String
+    refreshToken String
 
-  limit       String @default("0")
-  usage       String @default("max")
-  maxPrice    Float  @default(0)
-  priceOptionsFlag Int    @default(0)
-  mode        String @default("buy")
+    limit            String @default("0")
+    usage            String @default("max")
+    maxPrice         Float  @default(0)
+    priceOptionsFlag Int    @default(0)
+    mode             String @default("buy")
 
-  @@index([id])
+    @@index([id])
 }
 
 model App {
-  id Int @id
+    id Int @id
 
-  name            String
-  subId           Int
-  snr             String
-  originatingSnr  String
-  price           Float
-  limited         Boolean     @default(false)
-  hasTradingCards Boolean     @default(false)
-  isBundle        Boolean     @default(false)
-  includedApps    BundleApp[]
+    name            String
+    subId           Int
+    snr             String
+    originatingSnr  String
+    price           Float
+    limited         Boolean     @default(false)
+    hasTradingCards Boolean     @default(false)
+    isBundle        Boolean     @default(false)
+    includedApps    BundleApp[]
 
-  @@index([id])
+    @@index([id])
 }
 
 model BundleApp {
-  bundleId Int @id
-  appId    Int
+    bundleId Int @id
+    appId    Int
 
-  bundle App @relation(fields: [bundleId], references: [id])
+    bundle App @relation(fields: [bundleId], references: [id])
 
-  @@index([bundleId])
+    @@index([bundleId])
 }
