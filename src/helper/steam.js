@@ -20,6 +20,11 @@ import terminalImage from "terminal-image";
 import SteamID from "steamid";
 import { getAccounts, storeAccount } from "../db/account";
 import { addApp, getApp, getLimitedGames, updateGame } from "../db/games";
+import { isKeyActivated, storeActivatedKey } from "../db/activatedKeys";
+import {
+    getItemNameId as getItemNameIdFromDb,
+    storeItemNameId as storeItemNameIdToDb,
+} from "../db/itemNameId";
 import logger from "./logger";
 import {
     asyncFilter,
@@ -1059,6 +1064,11 @@ const sellItem = async (appId, contextId, assetId, price, amount) => {
     );
 
     if (response?.success !== true) {
+        // Check if error is due to too many pending confirmations
+        if (response?.message?.includes("too many listings pending confirmation")) {
+            return { error: "PENDING_CONFIRMATIONS", message: response.message };
+        }
+
         logger.error(`Could not sell item ${response.message}`);
         return false;
     }
@@ -1111,6 +1121,66 @@ const getItemPrice = async (appId, marketHashName, currency) => {
     }
 
     return getItemPriceBackup(appId, marketHashName);
+};
+
+const getItemNameId = async (appId, marketHashName) => {
+    // Check database first
+    const cachedNameId = await getItemNameIdFromDb(appId, marketHashName);
+    if (cachedNameId) {
+        return cachedNameId;
+    }
+
+    // Not in database, fetch from Steam
+    const url = `https://steamcommunity.com/market/listings/${appId}/${encodeURIComponent(marketHashName)}`;
+
+    const response = await getRequest(url, {
+        Referer: "https://steamcommunity.com/market/",
+        "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
+    });
+
+    if (!response) return null;
+
+    // Extract item_nameid from the page HTML
+    const match = response.match(/Market_LoadOrderSpread\(\s*(\d+)\s*\)/);
+    if (match && match[1]) {
+        const nameId = match[1];
+
+        // Store in database for future use
+        await storeItemNameIdToDb(appId, marketHashName, nameId);
+
+        return nameId;
+    }
+
+    return null;
+};
+
+const getItemOrdersHistogram = async (itemNameId, currency) => {
+    const url = new URL(
+        "https://steamcommunity.com/market/itemordershistogram",
+    );
+    url.searchParams.append("country", countryCode || "US");
+    url.searchParams.append("language", "english");
+    url.searchParams.append("currency", CURRENCY_CODES[currency]);
+    url.searchParams.append("item_nameid", itemNameId);
+
+    const response = responseToJSON(
+        await getRequest(url.href, {
+            Referer: "https://steamcommunity.com/market/",
+            "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
+        }).catch((e) => {
+            console.error(e);
+            return {};
+        }),
+    );
+
+    if (response?.success === 1 && response?.highest_buy_order) {
+        // highest_buy_order is in cents
+        return Number(response.highest_buy_order) / 100;
+    }
+
+    return null;
 };
 
 const getInventory = () =>
@@ -1178,13 +1248,17 @@ const getMarketListings = async (settings) => {
                     const listingPrice = balanceToAmount(
                         $(listing).find(".market_listing_price").text(),
                     ).amount;
-                    const hashName = `${
-                        $(listing)
-                            .find(".market_listing_item_name_link")
-                            .attr("href")
-                            .split("-")[0]
-                            .split("/")[6]
-                    }-${$(listing).find(".market_listing_item_name_link").text()}`;
+                    const itemLink = $(listing)
+                        .find(".market_listing_item_name_link")
+                        .attr("href");
+
+                    // URL format: https://steamcommunity.com/market/listings/{appid}/{item_name}
+                    // Split: ["https:", "", "steamcommunity.com", "market", "listings", "{appid}", "{item_name}"]
+                    const urlParts = itemLink.split("/");
+                    const appId = urlParts[5];
+                    const encodedItemName = urlParts[6];
+                    const itemName = decodeURIComponent(encodedItemName);
+                    const hashName = `${appId}|||${itemName}`;
 
                     if (typeof hashName === "undefined") {
                         logger.error(
@@ -1239,20 +1313,27 @@ const removeMarketListing = async (listingId) => {
             },
             {
                 Referer: "https://steamcommunity.com/market/",
+                Origin: "https://steamcommunity.com",
+                Cookie: globalCookies.join("; "),
+                "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
             },
         ),
     );
 
     if (!response) {
-        logger.error("removeMarketListing() Error removing listing");
+        logger.error(
+            `removeMarketListing() Error removing listing https://steamcommunity.com/market/removelisting/${listingId} :: ${global.sessionId}`,
+        );
         return false;
     }
 
     return true;
 };
 
-const removeOverpricedItems = async (wallet, config, removeAll = false) => {
+const removeOverpricedItems = async (wallet, config) => {
     const listedItems = await getMarketListings();
+    const removeAll = config.removeAll || false;
 
     const bar = new cliProgress.SingleBar(
         {
@@ -1285,11 +1366,10 @@ const removeOverpricedItems = async (wallet, config, removeAll = false) => {
         });
 
         if (typeof cache[listedItems[i].hashName] === "undefined") {
-            price = await getItemPrice(
-                753,
-                listedItems[i].hashName,
-                wallet.currency,
-            );
+            // hashName format is "{appid}|||{item_name}"
+            const [appId, itemName] = listedItems[i].hashName.split("|||");
+
+            price = await getItemPrice(appId, itemName, wallet.currency);
             await sleep(300);
 
             if (price === -1) {
@@ -1354,19 +1434,18 @@ const sellItems = async (config, wallet) => {
         (item) => item.type.includes("Card") && item.marketable,
     );
 
-    const items = [...backgrounds, ...emoticons];
+    const items = [...backgrounds, ...emoticons, ...tradingCards];
 
-    const bar = new cliProgress.SingleBar(
-        {
-            stopOnComplete: true,
-            format: `Selling Items | {bar} | {percentage}% | {value}/{total} Items | Time Elapsed: {duration}s | {eta}s | Total Price: {price} ${wallet.currency}`,
-        },
-        cliProgress.Presets.shades_grey,
+    logger.info(
+        `Starting to sell ${items.length} items (Instant Sell: ${config.instantSell ? "Yes" : "No"})...`,
     );
-    bar.start(items.length, 0, { duration: 0, price: 0 });
+
     const startTime = moment().valueOf();
     let totalPrice = 0;
     const priceCache = {};
+    const nameIdCache = {};
+    let skippedCount = 0;
+    let soldCount = 0;
 
     for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
@@ -1382,6 +1461,7 @@ const sellItems = async (config, wallet) => {
             await sleep(75);
 
             if (price === -1) {
+                skippedCount += 1;
                 // eslint-disable-next-line no-continue
                 continue;
             }
@@ -1391,7 +1471,12 @@ const sellItems = async (config, wallet) => {
             price = priceCache[item.market_hash_name];
         }
 
-        const { priceToRemove, priceCalculation } = config;
+        const {
+            priceToRemove,
+            priceCalculation,
+            instantSell,
+            instantSellThreshold,
+        } = config;
 
         let calculatedPrice = 0;
 
@@ -1401,13 +1486,92 @@ const sellItems = async (config, wallet) => {
             calculatedPrice = price - priceToRemove;
         }
 
-        // calculate - 0.13043478261%
-        let sellPrice = String(
-            Math.round(
-                (calculatedPrice - calculatedPrice * 0.13043478261).toFixed(2) *
-                    100,
-            ),
-        ).replace(/\./, "");
+        let sellPrice = 0;
+
+        // Instant sell mode: sell to highest buy order
+        if (instantSell) {
+            // Get item name ID
+            let nameId = nameIdCache[item.market_hash_name];
+            if (!nameId) {
+                nameId = await getItemNameId(item.appid, item.market_hash_name);
+                await sleep(100);
+
+                if (!nameId) {
+                    logger.warn(
+                        `[${i + 1}/${items.length}] Could not get name ID for ${item.market_hash_name}, skipping`,
+                    );
+                    skippedCount += 1;
+                    // eslint-disable-next-line no-continue
+                    continue;
+                }
+
+                nameIdCache[item.market_hash_name] = nameId;
+            }
+
+            // Get highest buy order
+            const highestBuyOrder = await getItemOrdersHistogram(
+                nameId,
+                wallet.currency,
+            );
+            await sleep(100);
+
+            if (!highestBuyOrder || highestBuyOrder === 0) {
+                logger.warn(
+                    `[${i + 1}/${items.length}] No buy orders for ${item.market_hash_name}, using normal price`,
+                );
+                // Fall back to normal pricing
+                sellPrice = String(
+                    Math.round(
+                        (
+                            calculatedPrice -
+                            calculatedPrice * 0.13043478261
+                        ).toFixed(2) * 100,
+                    ),
+                ).replace(/\./, "");
+            } else {
+                // The highest buy order is what the buyer will pay (e.g., 1.40€)
+                // We need to calculate what WE will receive after Steam's fees
+                // getPriceWithoutFees reverses the calculation
+                const weWillReceive = getPriceWithoutFees(highestBuyOrder);
+
+                // Check if instant sell price is within threshold
+                // Compare what we'll receive vs what we'd normally receive
+                const normalReceive =
+                    calculatedPrice - calculatedPrice * 0.13043478261;
+                const percentageDiff =
+                    ((normalReceive - weWillReceive) / normalReceive) * 100;
+
+                if (percentageDiff > instantSellThreshold) {
+                    logger.warn(
+                        `[${i + 1}/${items.length}] ${item.market_hash_name}: Instant sell would receive ${weWillReceive.toFixed(2)} vs normal ${normalReceive.toFixed(2)} (${percentageDiff.toFixed(1)}% less), exceeds threshold (${instantSellThreshold}%), listing at normal price instead`,
+                    );
+                    // Fall back to normal pricing
+                    sellPrice = String(
+                        Math.round(
+                            (calculatedPrice - calculatedPrice * 0.13043478261).toFixed(2) *
+                                100,
+                        ),
+                    ).replace(/\./, "");
+                } else {
+                    // sellPrice is what WE receive (in cents)
+                    // If buyer pays 1.40€, we receive ~1.22€, so we send 122
+                    sellPrice = Math.round(weWillReceive * 100);
+                    logger.success(
+                        `[${i + 1}/${items.length}] Instant selling ${item.market_hash_name}: buyer pays ${highestBuyOrder.toFixed(2)}, we receive ${weWillReceive.toFixed(2)} ${wallet.currency} (${percentageDiff.toFixed(1)}% less than normal ${normalReceive.toFixed(2)})`,
+                    );
+                }
+            }
+        } else {
+            // Normal sell mode
+            // calculate - 0.13043478261%
+            sellPrice = String(
+                Math.round(
+                    (calculatedPrice - calculatedPrice * 0.13043478261).toFixed(
+                        2,
+                    ) * 100,
+                ),
+            ).replace(/\./, "");
+        }
 
         // Steam Min price
         if (sellPrice <= 3) {
@@ -1415,26 +1579,62 @@ const sellItems = async (config, wallet) => {
         }
 
         if (sellPrice === 0 || sellPrice >= config.minPrice) {
-            if (
-                await sellItem(
+            const result = await sellItem(
+                item.appid,
+                item.contextid,
+                item.assetid,
+                sellPrice,
+                1,
+            );
+
+            // Check if we hit pending confirmations limit
+            if (result?.error === "PENDING_CONFIRMATIONS") {
+                logger.error(`Too many listings pending confirmation!`);
+                logger.warn(`Please confirm or cancel pending listings in the Steam Mobile App.`);
+
+                const inquirer = (await import("inquirer")).default;
+                await inquirer.prompt([
+                    {
+                        type: "confirm",
+                        message: "Press Enter when you're ready to continue...",
+                        name: "ready",
+                        default: true,
+                    },
+                ]);
+
+                logger.info(`Resuming item selling...`);
+
+                // Retry the same item
+                const retryResult = await sellItem(
                     item.appid,
                     item.contextid,
                     item.assetid,
                     sellPrice,
                     1,
-                )
-            ) {
+                );
+
+                if (retryResult === true) {
+                    totalPrice += Number(sellPrice);
+                    soldCount += 1;
+                    logger.info(
+                        `[${i + 1}/${items.length}] Sold ${item.market_hash_name} for ${(sellPrice / 100).toFixed(2)} ${wallet.currency}`,
+                    );
+                }
+            } else if (result === true) {
                 totalPrice += Number(sellPrice);
+                soldCount += 1;
+                logger.info(
+                    `[${i + 1}/${items.length}] Sold ${item.market_hash_name} for ${(sellPrice / 100).toFixed(2)} ${wallet.currency}`,
+                );
             }
         }
 
-        bar.update(i + 1, {
-            duration: `${moment.duration(moment().valueOf() - startTime).humanize()}`,
-            price: (Number.parseFloat(totalPrice) / 100.0).toFixed(2),
-        });
-
         await sleep(125);
     }
+
+    logger.info(
+        `Selling complete! Sold: ${soldCount}, Skipped: ${skippedCount}, Total: ${(totalPrice / 100).toFixed(2)} ${wallet.currency}, Time: ${moment.duration(moment().valueOf() - startTime).humanize()}`,
+    );
 };
 
 const pricePerGem = 0.46 / 1000;
@@ -1472,7 +1672,11 @@ const turnIntoGems = async (config, wallet) =>
             `Starting gem conversion process... for ${itemToGems.length} items`,
         );
 
+        let index = 0;
+        const total = itemToGems.length;
+
         for (const item of itemToGems) {
+            index++;
             const itemType = item.owner_actions
                 .find((action) => action.name === "Turn into Gems...")
                 .link.match("GetGooValue(.*?, .*?, .*?, (.*?),.*)")[2];
@@ -1542,7 +1746,7 @@ const turnIntoGems = async (config, wallet) =>
 
                 if (priceWithoutFees > gemPriceToGet) {
                     logger.info(
-                        `[Skipped] Item ${item.market_hash_name} is better off sold for ${priceWithoutFees} than grinding for (${gemPriceToGet})`,
+                        `[Skipped][${index}/${total}] Item ${item.market_hash_name} is better off sold for ${priceWithoutFees} than grinding for (${gemPriceToGet})`,
                     );
 
                     continue;
@@ -1550,18 +1754,18 @@ const turnIntoGems = async (config, wallet) =>
 
                 if (priceWithoutFees > 100) {
                     logger.info(
-                        `[Skipped] Item ${item.market_hash_name} is too expensive to grind for (${gemPriceToGet})`,
+                        `[Skipped][${index}/${total}] Item ${item.market_hash_name} is too expensive to grind for (${gemPriceToGet})`,
                     );
 
                     continue;
                 }
 
                 logger.success(
-                    `[Grinding] Item ${item.market_hash_name} is worth grinding for ${gemPriceToGet} vs ${priceWithoutFees}`,
+                    `[Grinding][${index}/${total}] Item ${item.market_hash_name} is worth grinding for ${gemPriceToGet} vs ${priceWithoutFees}`,
                 );
             } else {
                 logger.success(
-                    `[Grinding] Item ${item.market_hash_name} is NMC so grinding`,
+                    `[Grinding][${index}/${total}] Item ${item.market_hash_name} is NMC so grinding`,
                 );
             }
 
@@ -1616,6 +1820,235 @@ const redeemApps = async (config) =>
         }
     });
 
+const activateKeys = async (config) =>
+    // biome-ignore lint/suspicious/noAsyncPromiseExecutor: <explanation>
+    new Promise(async (resolve) => {
+        let successCount = 0;
+        let failedCount = 0;
+        let skippedCount = 0;
+        let autoRetryOnRateLimit = false;
+
+        logger.info(`Starting activation of ${config.keys.length} keys...`);
+
+        // Pre-filter keys: remove already activated ones and invalid formats
+        // Extract key pattern from line (ignoring surrounding text)
+        const keyRegex = /([A-Z0-9]{4,5}-[A-Z0-9]{4,5}-[A-Z0-9]{4,5}(-[A-Z0-9]{4,5}(-[A-Z0-9]{4,5})?)?)/i;
+        const keysToProcess = [];
+        let alreadyActivatedCount = 0;
+        let invalidFormatCount = 0;
+        const invalidLines = [];
+
+        for (const rawKey of config.keys) {
+            const line = rawKey.trim();
+
+            if (!line) {
+                continue;
+            }
+
+            // Try to extract key from the line
+            const match = line.match(keyRegex);
+            if (!match || !match[0]) {
+                invalidFormatCount += 1;
+                invalidLines.push(line);
+                continue;
+            }
+
+            const key = match[0];
+
+            const alreadyActivated = await isKeyActivated(key);
+            if (alreadyActivated) {
+                alreadyActivatedCount += 1;
+                continue;
+            }
+
+            keysToProcess.push(key);
+        }
+
+        if (alreadyActivatedCount > 0) {
+            logger.info(`Skipped ${alreadyActivatedCount} already activated keys`);
+        }
+        if (invalidFormatCount > 0) {
+            logger.info(`Skipped ${invalidFormatCount} invalid key formats:`);
+            invalidLines.forEach((line, idx) => {
+                logger.warn(`  [${idx + 1}] ${line}`);
+            });
+        }
+
+        logger.info(`Processing ${keysToProcess.length} keys...`);
+
+        for (let i = 0; i < keysToProcess.length; i += 1) {
+            const key = keysToProcess[i];
+
+            const response = responseToJSON(
+                await postRequest(
+                    "https://store.steampowered.com/account/ajaxregisterkey/",
+                    {
+                        product_key: key,
+                        sessionid: global.sessionId,
+                    },
+                    {
+                        Cookie: globalCookies.join("; "),
+                        "Content-Type":
+                            "application/x-www-form-urlencoded; charset=UTF-8",
+                        Origin: "https://store.steampowered.com",
+                        Referer:
+                            "https://store.steampowered.com/account/registerkey",
+                    },
+                ),
+            );
+
+            // If response is false, it means we got a network error or rate limit
+            // Don't mark as failed, just skip and let user retry later
+            if (response === false) {
+                skippedCount += 1;
+                logger.warn(
+                    `[${i + 1}/${keysToProcess.length}] Network error or rate limit for "${key}" - skipping without marking as used`,
+                );
+                // eslint-disable-next-line no-continue
+                continue;
+            }
+
+            const purchaseResultDetails = response?.purchase_result_details;
+            const packageId =
+                response?.purchase_receipt_info?.line_items?.[0]?.packageid?.toString() ||
+                null;
+            const lineItemDescription =
+                response?.purchase_receipt_info?.line_items?.[0]
+                    ?.line_item_description || "Unknown";
+
+            // success: 1 = successfully activated
+            if (response?.success === 1) {
+                successCount += 1;
+                logger.success(
+                    `[${i + 1}/${keysToProcess.length}] Successfully activated "${key}": ${lineItemDescription} (${packageId || "Unknown"})`,
+                );
+
+                // Store as successful activation
+                await storeActivatedKey(
+                    key,
+                    config.accountId,
+                    true,
+                    packageId,
+                    null,
+                );
+            } else if (purchaseResultDetails === 9) {
+                // Case 9: Already owns the product - key is consumed
+                successCount += 1;
+                logger.success(
+                    `[${i + 1}/${keysToProcess.length}] Already owned "${key}": ${lineItemDescription} (${packageId || "Unknown"})`,
+                );
+
+                // Store as activated (key is consumed)
+                await storeActivatedKey(
+                    key,
+                    config.accountId,
+                    true,
+                    packageId,
+                    "Already owned",
+                );
+            } else if (purchaseResultDetails === 53) {
+                // Case 53: Rate limit exceeded
+                logger.warn(
+                    `[${i + 1}/${keysToProcess.length}] Rate limit exceeded for "${key}"`,
+                );
+
+                // If first time hitting rate limit, ask user if they want to wait
+                if (!autoRetryOnRateLimit) {
+                    const inquirer = (await import("inquirer")).default;
+                    const answer = await inquirer.prompt([
+                        {
+                            type: "confirm",
+                            message: "Rate limit hit! Would you like to wait 1 hour and retry?",
+                            name: "waitAndRetry",
+                            default: true,
+                        },
+                    ]);
+
+                    if (!answer.waitAndRetry) {
+                        logger.error(
+                            "Rate limit hit! Stopping activation. Remaining keys will not be marked as used.",
+                        );
+                        break;
+                    }
+
+                    // User agreed to wait, set flag for future rate limits
+                    autoRetryOnRateLimit = true;
+                }
+
+                // Wait 1 hour
+                logger.info("Waiting 1 hour before retrying...");
+                await sleep(60 * 60 * 1000); // 1 hour in milliseconds
+                logger.info("Retrying activation...");
+
+                // Retry the same key (decrement i so the loop will retry this index)
+                i -= 1;
+                // eslint-disable-next-line no-continue
+                continue;
+            } else if (purchaseResultDetails === 15) {
+                // Case 15: Already activated by different account - key is consumed
+                failedCount += 1;
+                logger.error(
+                    `[${i + 1}/${keysToProcess.length}] Already used by another account: "${key}"`,
+                );
+
+                // Store as activated/failed (key is consumed, can't be used again)
+                await storeActivatedKey(
+                    key,
+                    config.accountId,
+                    true,
+                    packageId,
+                    "Already activated by different account",
+                );
+            } else {
+                // Other errors (invalid key, region lock, etc.)
+                failedCount += 1;
+
+                const errorMessages = {
+                    14: "Invalid product code",
+                    16: "Batched request timeout",
+                    13: "Not available in this region",
+                    24: "Requires ownership of another product",
+                    36: "Requires PlayStation 3 activation",
+                    50: "Steam Wallet code (use different page)",
+                    4: "Unknown error (4)",
+                };
+
+                const errorMessage =
+                    errorMessages[purchaseResultDetails] ||
+                    `Unexpected error (code: ${purchaseResultDetails})`;
+
+                logger.error(
+                    `[${i + 1}/${keysToProcess.length}] Failed "${key}": ${errorMessage}`,
+                );
+
+                // For timeout (16), don't mark as used
+                if (purchaseResultDetails === 16) {
+                    skippedCount += 1;
+                    failedCount -= 1;
+                    // eslint-disable-next-line no-continue
+                    continue;
+                }
+
+                // Store the failed activation
+                await storeActivatedKey(
+                    key,
+                    config.accountId,
+                    false,
+                    packageId,
+                    errorMessage,
+                );
+            }
+
+            // Add a small delay to avoid rate limiting
+            await sleep(1000);
+        }
+
+        logger.info(
+            `Activation complete! Success: ${successCount}, Failed: ${failedCount}, Skipped: ${skippedCount}`,
+        );
+        resolve();
+    });
+
 export {
     doLogin,
     chooseAccount,
@@ -1640,4 +2073,5 @@ export {
     redeemApps,
     turnIntoGems,
     getAppDetails,
+    activateKeys,
 };

@@ -48,3 +48,29 @@ model BundleApp {
 
     @@index([bundleId])
 }
+
+model ActivatedKey {
+    id Int @id @unique @default(autoincrement())
+
+    productKey  String   @unique
+    accountId   Int
+    activatedAt DateTime @default(now())
+    success     Boolean
+    packageId   String?
+    errorMessage String?
+
+    @@index([productKey])
+    @@index([accountId])
+}
+
+model ItemNameId {
+    id Int @id @unique @default(autoincrement())
+
+    appId          Int
+    marketHashName String
+    nameId         String
+    createdAt      DateTime @default(now())
+
+    @@unique([appId, marketHashName])
+    @@index([appId, marketHashName])
+}

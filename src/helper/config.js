@@ -61,6 +61,32 @@ const sellChoices = async () => {
     // eslint-disable-next-line no-bitwise
     const sellOptionsFlag = extraOptions.options.reduce((a, b) => a | b, 0);
 
+    const instantSellAnswer = await inquirer.prompt([
+        {
+            type: "confirm",
+            message: "Enable instant sell mode? (Sell to highest buy order instead of listing)",
+            name: "instantSell",
+            default: false,
+        },
+    ]);
+
+    let instantSellThreshold = 100;
+    if (instantSellAnswer.instantSell) {
+        const thresholdAnswer = await inquirer.prompt([
+            {
+                type: "input",
+                message: "What is the maximum acceptable discount percentage for instant sell? (e.g., 50 means up to 50% less than normal price)",
+                name: "threshold",
+                default: 50,
+                validate: (value) =>
+                    /^\d+$/.test(value) && Number(value) >= 0 && Number(value) <= 100
+                        ? true
+                        : "Please enter a number between 0 and 100",
+            },
+        ]);
+        instantSellThreshold = Number(thresholdAnswer.threshold);
+    }
+
     const priceCalculation = await inquirer.prompt([
         {
             type: "list",
@@ -107,6 +133,8 @@ const sellChoices = async () => {
         minPrice: Number.parseFloat(minPriceAnswer.minPrice) * 100,
         priceToRemove: priceToRemoveAnswer.priceToRemove,
         priceCalculation: priceCalculation.priceCalculation,
+        instantSell: instantSellAnswer.instantSell,
+        instantSellThreshold,
     };
 };
 
@@ -361,12 +389,8 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
                         value: "sell",
                     },
                     {
-                        name: "Clean up Market Listings",
+                        name: "Remove Market Listings",
                         value: "cleanup",
-                    },
-                    {
-                        name: "Remove Listings",
-                        value: "cleanAll",
                     },
                     {
                         name: "Turn everything into gems",
@@ -375,6 +399,10 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
                     {
                         name: "Redeem Apps",
                         value: "redeemApps",
+                    },
+                    {
+                        name: "Activate CD Keys",
+                        value: "activateKeys",
                     },
                     {
                         name: "Exit",
@@ -410,6 +438,35 @@ const setupConfig = async (account, wallet, ownedGameCount) => {
             return redeemAppChoices(account, wallet);
         }
 
+        if (answers.usage === "activateKeys") {
+            return activateKeyChoices(account);
+        }
+
+        if (answers.usage === "cleanup") {
+            const cleanupChoice = await inquirer.prompt([
+                {
+                    type: "list",
+                    message: "What type of cleanup would you like to do?",
+                    name: "cleanupType",
+                    choices: [
+                        {
+                            name: "Remove overpriced listings only",
+                            value: false,
+                        },
+                        {
+                            name: "Remove ALL listings",
+                            value: true,
+                        },
+                    ],
+                },
+            ]);
+
+            return {
+                mode: "cleanup",
+                removeAll: cleanupChoice.cleanupType,
+            };
+        }
+
         // if (answers.usage === 'turnIntoGems') {
         //   return gemChoices(account, wallet);
         // }
@@ -437,6 +494,59 @@ const redeemAppChoices = async () => {
     return {
         mode: "redeemApps",
         list: gameList.list.split(","),
+    };
+};
+
+const activateKeyChoices = async (account) => {
+    const { readFileSync, existsSync } = await import("fs");
+
+    const filePathAnswer = await inquirer.prompt([
+        {
+            type: "input",
+            message: "Enter the path to the text file containing CD keys (one per line)",
+            name: "filePath",
+            default: "./keys.text",
+            validate: (value) => {
+                try {
+                    if (!existsSync(value)) {
+                        return "File does not exist. Please enter a valid file path.";
+                    }
+                    return true;
+                } catch (e) {
+                    return "Invalid file path";
+                }
+            },
+        },
+    ]);
+
+    let keys = [];
+    try {
+        const fileContent = readFileSync(filePathAnswer.filePath, "utf-8");
+        keys = fileContent.split("\n").filter((key) => key.trim() !== "");
+
+        logger.info(`Found ${keys.length} keys in file`);
+    } catch (e) {
+        logger.error(`Error reading file: ${e.message}`);
+        return { mode: "exit" };
+    }
+
+    if (keys.length === 0) {
+        logger.error("No keys found in file");
+        return { mode: "exit" };
+    }
+
+    const confirmAnswer = await confirm(
+        `Do you want to activate ${keys.length} CD keys?`,
+    );
+
+    if (!confirmAnswer) {
+        return { mode: "exit" };
+    }
+
+    return {
+        mode: "activateKeys",
+        keys,
+        accountId: account.id,
     };
 };
 

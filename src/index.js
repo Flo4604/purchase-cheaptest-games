@@ -13,6 +13,7 @@ import {
     turnIntoGems,
     redeemApps,
     getAppDetails,
+    activateKeys,
 } from "./helper";
 import { getAccount } from "./db/account";
 import logger from "./helper/logger";
@@ -59,13 +60,12 @@ while (true) {
         await sellItems(config, wallet);
     } else if (config.mode === "buy") {
         await buyGames(config, ownedApps, ownedAppsRealCount, wallet);
-    } else if (config.mode === "cleanAll") {
-        await removeOverpricedItems(wallet, config, true);
-        break;
     } else if (config.mode === "turnIntoGems") {
         await turnIntoGems(config, wallet);
     } else if (config.mode === "redeemApps") {
         await redeemApps(config);
+    } else if (config.mode === "activateKeys") {
+        await activateKeys(config);
     } else if (config.mode === "chooseAccount") {
         showAccountSelection = true;
         // eslint-disable-next-line no-continue
