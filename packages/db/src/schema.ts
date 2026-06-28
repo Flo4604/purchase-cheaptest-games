@@ -6,11 +6,33 @@ import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 //   - DateTime was stored as epoch ms integers -> integer({ mode: "timestamp_ms" })
 // Table names keep their original PascalCase.
 
+// Owns Steam accounts. Stores only password-derived material — never the KEK
+// (which is derived from the password at login and held in memory only).
+export const user = sqliteTable("User", {
+	id: integer("id").primaryKey({ autoIncrement: true }),
+	email: text("email").notNull().unique(),
+	authHash: text("authHash").notNull(),
+	saltAuth: text("saltAuth").notNull(),
+	saltKek: text("saltKek").notNull(),
+	createdAt: integer("createdAt", { mode: "timestamp_ms" })
+		.notNull()
+		.$defaultFn(() => new Date()),
+});
+
 export const account = sqliteTable("Account", {
 	id: integer("id").primaryKey({ autoIncrement: true }),
 	username: text("username").notNull().unique(),
-	accessToken: text("accessToken").notNull(),
-	refreshToken: text("refreshToken").notNull(),
+	// Web (zero-knowledge) path: the Steam refresh token is envelope-encrypted
+	// under the user's KEK (@psg/crypto). Nullable so legacy CLI rows are valid.
+	userId: integer("userId").references(() => user.id),
+	wrappedDek: text("wrappedDek"),
+	dekNonce: text("dekNonce"),
+	encryptedRefreshToken: text("encryptedRefreshToken"),
+	tokenNonce: text("tokenNonce"),
+	// LEGACY plaintext tokens — reference CLI only. Now nullable; dropped at
+	// web-app parity when the CLI is retired.
+	accessToken: text("accessToken"),
+	refreshToken: text("refreshToken"),
 	limit: text("limit").notNull().default("0"),
 	usage: text("usage").notNull().default("max"),
 	maxPrice: real("maxPrice").notNull().default(0),
