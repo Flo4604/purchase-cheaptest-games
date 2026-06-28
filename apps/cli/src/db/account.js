@@ -1,6 +1,7 @@
+// LEGACY shim for the reference CLI only. New code (engine) uses `db` directly
+// from @psg/db — do not grow this layer.
+import { account, db } from "@psg/db";
 import { eq } from "drizzle-orm";
-import { db } from "./client.js";
-import { account } from "./schema.js";
 
 const getAccounts = async () => db.select().from(account);
 

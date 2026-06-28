@@ -1,0 +1,33 @@
+{
+	"name": "@psg/cli",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Reference inquirer CLI. Kept during migration; removed at web-app parity.",
+	"bin": {
+		"purchase": "src/index.js"
+	},
+	"scripts": {
+		"start": "tsx src/index.js",
+		"test": "node --test"
+	},
+	"dependencies": {
+		"@psg/db": "workspace:*",
+		"axios": "^1.10.0",
+		"cheerio": "1.0.0-rc.12",
+		"cli-progress": "^3.12.0",
+		"consola": "^3.4.2",
+		"drizzle-orm": "^0.36.4",
+		"inquirer": "^9.3.7",
+		"inquirer-number-plus": "^1.0.0",
+		"moment": "^2.30.1",
+		"qs": "^6.14.0",
+		"steam-session": "^1.9.3",
+		"steam-tradeoffer-manager": "^2.12.1",
+		"steam-user": "^5.2.3",
+		"steamcommunity": "^3.48.8",
+		"steamid": "^2.1.0",
+		"steamstore": "^2.4.0",
+		"terminal-image": "^2.0.0"
+	}
+}

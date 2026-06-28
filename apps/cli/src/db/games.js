@@ -1,6 +1,7 @@
+// LEGACY shim for the reference CLI only. New code (engine) uses `db` directly
+// from @psg/db — do not grow this layer.
+import { app, bundleApp, db } from "@psg/db";
 import { eq } from "drizzle-orm";
-import { db } from "./client.js";
-import { app, bundleApp } from "./schema.js";
 
 const addApp = async (appData) => {
 	const {
@@ -64,16 +65,11 @@ const updateGame = async (id, limited, hasTradingCards) => {
 };
 
 const getApp = async (id) => {
-	const rows = await db
-		.select()
-		.from(app)
-		.where(eq(app.id, Number(id)));
+	const rows = await db.select().from(app).where(eq(app.id, Number(id)));
 	const found = rows[0];
 	if (!found) return null;
 
-	// Mirror Prisma's `include: { includedApps: true }`. The BundleApp relation is
-	// effectively unused (table stays empty), but callers read
-	// `app.includedApps.length`, so it must always be an array.
+	// Callers read `app.includedApps.length`, so it must always be an array.
 	const includedApps = await db
 		.select()
 		.from(bundleApp)

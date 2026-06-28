@@ -1,0 +1,35 @@
+{
+	"name": "@psg/engine",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "tsx watch src/index.ts",
+		"start": "tsx src/index.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"build": "tsc --noEmit -p tsconfig.json",
+		"test": "node --import tsx --test src/steam/http.test.ts"
+	},
+	"dependencies": {
+		"@effect/platform": "^0.96.2",
+		"@effect/platform-node": "^0.107.0",
+		"@psg/core": "workspace:*",
+		"@psg/crypto": "workspace:*",
+		"@psg/db": "workspace:*",
+		"axios": "^1.10.0",
+		"cheerio": "1.0.0-rc.12",
+		"drizzle-orm": "^0.36.4",
+		"effect": "^3.21.4",
+		"moment": "^2.30.1",
+		"qs": "^6.14.0",
+		"steam-session": "^1.9.3",
+		"steam-tradeoffer-manager": "^2.12.1",
+		"steam-user": "^5.2.3",
+		"steamcommunity": "^3.48.8",
+		"steamid": "^2.1.0",
+		"steamstore": "^2.4.0"
+	},
+	"devDependencies": {
+		"@types/qs": "^6.9.18"
+	}
+}

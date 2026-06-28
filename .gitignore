@@ -1,5 +1,12 @@
 node_modules
 *.sqlite
+# Monorepo / build artifacts
+.turbo
+.output
+.tanstack
+dist
+# TanStack Router generated route tree
+apps/web/src/routeTree.gen.ts
 # Keep environment variables out of version control
 .env
 debug

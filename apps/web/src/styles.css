@@ -1,0 +1,15 @@
+/* StyleX appends its compiled atomic CSS here at build time. This file must be
+   imported on every route (see __root.tsx). */
+@layer reset, base, stylex;
+
+:root {
+	color-scheme: dark;
+}
+
+html,
+body {
+	margin: 0;
+	background: #0b0d10;
+	color: #e6e8eb;
+	font-family: Inter, system-ui, sans-serif;
+}
