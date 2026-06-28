@@ -1,52 +1,37 @@
-import { PrismaClient } from "@prisma/client";
+import { eq } from "drizzle-orm";
+import { db } from "./client.js";
+import { account } from "./schema.js";
 
-const prisma = new PrismaClient();
+const getAccounts = async () => db.select().from(account);
 
-const getAccounts = async () => prisma.account.findMany();
+const getAccount = async (id) => {
+	const rows = await db.select().from(account).where(eq(account.id, id));
+	return rows[0] ?? null;
+};
 
-const getAccount = async (id) =>
-	prisma.account.findFirst({
-		where: {
-			id,
-		},
-	});
+const storeAccount = async (username, accessToken, refreshToken) => {
+	const rows = await db
+		.insert(account)
+		.values({ username, accessToken, refreshToken })
+		.returning();
+	return rows[0];
+};
 
-const storeAccount = async (username, accessToken, refreshToken) =>
-	prisma.account.create({
-		data: {
-			username,
-			accessToken,
-			refreshToken,
-		},
-	});
+const updateTokens = async (id, accessToken, refreshToken) =>
+	db
+		.update(account)
+		.set({ accessToken, refreshToken })
+		.where(eq(account.id, id));
 
 const updateConfig = async (id, limit, usage, maxPrice, priceOptionsFlag) =>
-	prisma.account.update({
-		where: {
-			id,
-		},
-		data: {
+	db
+		.update(account)
+		.set({
 			limit: `${limit}`,
 			usage,
 			maxPrice: Number(maxPrice),
 			priceOptionsFlag,
-		},
-	});
+		})
+		.where(eq(account.id, id));
 
-const updateAccount = async (id, username, password) => {
-	const account = await getAccount(id);
-	if (account) {
-		return prisma.account.update({
-			where: {
-				id,
-			},
-			data: {
-				username,
-				password,
-			},
-		});
-	}
-	return null;
-};
-
-export { getAccounts, getAccount, storeAccount, updateConfig, updateAccount };
+export { getAccounts, getAccount, storeAccount, updateTokens, updateConfig };

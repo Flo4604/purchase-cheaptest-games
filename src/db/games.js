@@ -1,8 +1,8 @@
-import { PrismaClient } from "@prisma/client";
+import { eq } from "drizzle-orm";
+import { db } from "./client.js";
+import { app, bundleApp } from "./schema.js";
 
-const prisma = new PrismaClient();
-
-const addApp = async (app) => {
+const addApp = async (appData) => {
 	const {
 		name,
 		originatingSnr,
@@ -13,37 +13,37 @@ const addApp = async (app) => {
 		limited,
 		hasTradingCards,
 		isBundle,
-		includedApps,
-	} = app;
+	} = appData;
+
+	const values = {
+		id: Number(id),
+		name,
+		subId: Number(subId),
+		snr,
+		originatingSnr,
+		price: Number(price),
+		limited: Boolean(limited),
+		hasTradingCards: Boolean(hasTradingCards),
+		isBundle: Boolean(isBundle),
+	};
 
 	try {
-		await prisma.app.upsert({
-			create: {
-				name,
-				originatingSnr,
-				snr,
-				subId: Number(subId),
-				price: Number(price),
-				id: Number(id),
-				hasTradingCards,
-				isBundle,
-				includedApps,
-				limited,
-			},
-			update: {
-				name,
-				originatingSnr,
-				snr,
-				subId: Number(subId),
-				price: Number(price),
-				id: Number(id),
-				limited,
-				hasTradingCards,
-				includedApps,
-				isBundle,
-			},
-			where: { id: Number(id) },
-		});
+		await db
+			.insert(app)
+			.values(values)
+			.onConflictDoUpdate({
+				target: app.id,
+				set: {
+					name: values.name,
+					subId: values.subId,
+					snr: values.snr,
+					originatingSnr: values.originatingSnr,
+					price: values.price,
+					limited: values.limited,
+					hasTradingCards: values.hasTradingCards,
+					isBundle: values.isBundle,
+				},
+			});
 	} catch (error) {
 		console.error(error.message);
 	}
@@ -51,24 +51,38 @@ const addApp = async (app) => {
 
 const updateGame = async (id, limited, hasTradingCards) => {
 	try {
-		await prisma.app.update({
-			where: { id: Number(id) },
-			data: { limited, hasTradingCards },
-		});
+		await db
+			.update(app)
+			.set({
+				limited: Boolean(limited),
+				hasTradingCards: Boolean(hasTradingCards),
+			})
+			.where(eq(app.id, Number(id)));
 	} catch (error) {
 		console.error(error.message);
 	}
 };
 
-const getApp = async (id) =>
-	prisma.app.findUnique({
-		where: { id: Number(id) },
-		include: { includedApps: true },
-	});
+const getApp = async (id) => {
+	const rows = await db
+		.select()
+		.from(app)
+		.where(eq(app.id, Number(id)));
+	const found = rows[0];
+	if (!found) return null;
+
+	// Mirror Prisma's `include: { includedApps: true }`. The BundleApp relation is
+	// effectively unused (table stays empty), but callers read
+	// `app.includedApps.length`, so it must always be an array.
+	const includedApps = await db
+		.select()
+		.from(bundleApp)
+		.where(eq(bundleApp.bundleId, found.id));
+
+	return { ...found, includedApps };
+};
 
 const getLimitedGames = async () =>
-	prisma.app.findMany({
-		where: { limited: true },
-	});
+	db.select().from(app).where(eq(app.limited, true));
 
 export { addApp, getApp, updateGame, getLimitedGames };

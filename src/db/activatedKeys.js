@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { desc, eq } from "drizzle-orm";
+import { db } from "./client.js";
+import { activatedKey } from "./schema.js";
 
 /**
  * Check if a key has already been activated (consumed)
@@ -8,20 +8,19 @@ const prisma = new PrismaClient();
  * @returns {Promise<boolean>} - True if key was already activated/consumed
  */
 const isKeyActivated = async (productKey) => {
-    const key = await prisma.activatedKey.findUnique({
-        where: {
-            productKey,
-        },
-    });
+	const rows = await db
+		.select()
+		.from(activatedKey)
+		.where(eq(activatedKey.productKey, productKey));
+	const key = rows[0];
 
-    // Key is considered "activated" if it was successfully consumed
-    // This includes: successfully activated, already owned, or used by another account
-    // Keys with success: true are consumed and shouldn't be retried
-    return key !== null && key.success === true;
+	// Key is considered "activated" only if it was successfully consumed; keys
+	// with success: true shouldn't be retried.
+	return key != null && key.success === true;
 };
 
 /**
- * Store an activated key in the database
+ * Store an activated key in the database (upsert on productKey)
  * @param {string} productKey - The product key
  * @param {number} accountId - The account ID
  * @param {boolean} success - Whether the activation was successful
@@ -30,31 +29,27 @@ const isKeyActivated = async (productKey) => {
  * @returns {Promise<Object>} - The stored key record
  */
 const storeActivatedKey = async (
-    productKey,
-    accountId,
-    success,
-    packageId = null,
-    errorMessage = null,
+	productKey,
+	accountId,
+	success,
+	packageId = null,
+	errorMessage = null,
 ) => {
-    return prisma.activatedKey.upsert({
-        where: {
-            productKey,
-        },
-        update: {
-            accountId,
-            success,
-            packageId,
-            errorMessage,
-            activatedAt: new Date(),
-        },
-        create: {
-            productKey,
-            accountId,
-            success,
-            packageId,
-            errorMessage,
-        },
-    });
+	const rows = await db
+		.insert(activatedKey)
+		.values({ productKey, accountId, success, packageId, errorMessage })
+		.onConflictDoUpdate({
+			target: activatedKey.productKey,
+			set: {
+				accountId,
+				success,
+				packageId,
+				errorMessage,
+				activatedAt: new Date(),
+			},
+		})
+		.returning();
+	return rows[0];
 };
 
 /**
@@ -62,16 +57,12 @@ const storeActivatedKey = async (
  * @param {number} accountId - The account ID
  * @returns {Promise<Array>} - Array of activated keys
  */
-const getActivatedKeysByAccount = async (accountId) => {
-    return prisma.activatedKey.findMany({
-        where: {
-            accountId,
-        },
-        orderBy: {
-            activatedAt: "desc",
-        },
-    });
-};
+const getActivatedKeysByAccount = async (accountId) =>
+	db
+		.select()
+		.from(activatedKey)
+		.where(eq(activatedKey.accountId, accountId))
+		.orderBy(desc(activatedKey.activatedAt));
 
 /**
  * Get activation statistics for an account
@@ -79,25 +70,24 @@ const getActivatedKeysByAccount = async (accountId) => {
  * @returns {Promise<Object>} - Statistics object with success/failure counts
  */
 const getActivationStats = async (accountId) => {
-    const allKeys = await prisma.activatedKey.findMany({
-        where: {
-            accountId,
-        },
-    });
+	const allKeys = await db
+		.select()
+		.from(activatedKey)
+		.where(eq(activatedKey.accountId, accountId));
 
-    const successCount = allKeys.filter((key) => key.success).length;
-    const failureCount = allKeys.filter((key) => !key.success).length;
+	const successCount = allKeys.filter((key) => key.success).length;
+	const failureCount = allKeys.filter((key) => !key.success).length;
 
-    return {
-        total: allKeys.length,
-        success: successCount,
-        failure: failureCount,
-    };
+	return {
+		total: allKeys.length,
+		success: successCount,
+		failure: failureCount,
+	};
 };
 
 export {
-    isKeyActivated,
-    storeActivatedKey,
-    getActivatedKeysByAccount,
-    getActivationStats,
+	isKeyActivated,
+	storeActivatedKey,
+	getActivatedKeysByAccount,
+	getActivationStats,
 };

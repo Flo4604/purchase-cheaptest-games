@@ -18,14 +18,11 @@ import { EAuthTokenPlatformType, LoginSession } from "steam-session";
 import axios from "axios";
 import terminalImage from "terminal-image";
 import SteamID from "steamid";
-import { getAccounts, storeAccount } from "../db/account";
+import { getAccounts, storeAccount, updateTokens } from "../db/account";
 import { addApp, getApp, getLimitedGames, updateGame } from "../db/games";
 import { isKeyActivated, storeActivatedKey } from "../db/activatedKeys";
-import {
-    getItemNameId as getItemNameIdFromDb,
-    storeItemNameId as storeItemNameIdToDb,
-} from "../db/itemNameId";
 import logger from "./logger";
+import { parseSSRListing } from "./ssrParser";
 import {
     asyncFilter,
     getPriceWithoutFees,
@@ -191,8 +188,9 @@ const chooseAccount = async () => {
     return answers.account;
 };
 
-const addAccount = async () =>
-    new Promise(async (resolve) => {
+// Runs the QR login flow and resolves with the freshly issued tokens.
+const startQrLogin = async () =>
+    new Promise(async (resolve, reject) => {
         const session = new LoginSession(EAuthTokenPlatformType.SteamClient);
         session.loginTimeout = 120000; // timeout after 2 minutes
         const startResult = await session.startWithQR();
@@ -220,37 +218,70 @@ const addAccount = async () =>
             );
         });
 
-        session.on("authenticated", async () => {
-            await storeAccount(
-                session.accountName,
-                session.accessToken,
-                session.refreshToken,
-            );
-
-            resolve();
+        session.on("authenticated", () => {
             logger.log("\nAuthenticated successfully!");
+            resolve({
+                accountName: session.accountName,
+                accessToken: session.accessToken,
+                refreshToken: session.refreshToken,
+            });
         });
 
         session.on("timeout", () => {
-            throw new Error("This login attempt has timed out.");
+            reject(new Error("This login attempt has timed out."));
         });
 
         session.on("error", (err) => {
             // This should ordinarily not happen. This only happens in case there's some kind of unexpected error while
             // polling, e.g. the network connection goes down or Steam chokes on something.
-            throw new Error(
-                `ERROR: This login attempt has failed! ${err.message}`,
+            reject(
+                new Error(`ERROR: This login attempt has failed! ${err.message}`),
             );
         });
     });
 
-const doLogin = async (account) =>
-    new Promise(async (resolve) => {
-        client.logOn({
-            refreshToken: account.refreshToken,
-        });
+const addAccount = async () => {
+    const { accountName, accessToken, refreshToken } = await startQrLogin();
 
-        client.on("webSession", async (sessionID, cookies) => {
+    await storeAccount(accountName, accessToken, refreshToken);
+};
+
+// Re-runs the QR login for an existing account whose refresh token has expired,
+// persists the new tokens, and returns the updated account.
+const reauthenticate = async (account) => {
+    logger.warn(
+        `The saved login for "${account.username}" has expired. Please scan the QR code to log in again.`,
+    );
+
+    const { accessToken, refreshToken } = await startQrLogin();
+
+    await updateTokens(account.id, accessToken, refreshToken);
+
+    return { ...account, accessToken, refreshToken };
+};
+
+const doLogin = async (account) =>
+    new Promise(async (resolve, reject) => {
+        const onError = async (err) => {
+            client.removeListener("webSession", onWebSession);
+
+            // EResult 27 = Expired: the stored refresh token is no longer valid
+            // and cannot be refreshed, so we need a fresh QR login.
+            if (err.eresult === SteamUser.EResult.Expired) {
+                try {
+                    const updated = await reauthenticate(account);
+                    resolve(await doLogin(updated));
+                } catch (reauthErr) {
+                    reject(reauthErr);
+                }
+                return;
+            }
+
+            reject(err);
+        };
+
+        async function onWebSession(sessionID, cookies) {
+            client.removeListener("error", onError);
             setCookies(cookies);
 
             const session = new LoginSession(EAuthTokenPlatformType.WebBrowser);
@@ -286,6 +317,13 @@ const doLogin = async (account) =>
                 sessionId: newSessionId,
                 accessToken,
             });
+        }
+
+        client.once("error", onError);
+        client.once("webSession", onWebSession);
+
+        client.logOn({
+            refreshToken: account.refreshToken,
         });
     });
 // [ Actual Steam requests ]
@@ -334,6 +372,11 @@ async function getAppDetails(app, forceUrl = false) {
         `https://store.steampowered.com/app/${appId}?snr=1_direct-navigation__`;
 
     const appPage = await getRequest(url);
+
+    if (!appPage) {
+        logger.error(`getAppDetails(): Failed to fetch page for ${appId}`);
+        return false;
+    }
 
     const $ = cheerio.load(appPage);
 
@@ -1123,14 +1166,15 @@ const getItemPrice = async (appId, marketHashName, currency) => {
     return getItemPriceBackup(appId, marketHashName);
 };
 
-const getItemNameId = async (appId, marketHashName) => {
-    // Check database first
-    const cachedNameId = await getItemNameIdFromDb(appId, marketHashName);
-    if (cachedNameId) {
-        return cachedNameId;
-    }
-
-    // Not in database, fetch from Steam
+// Steam's new (React SSR) market UI no longer exposes `item_nameid` in the
+// listing page HTML, so the old getItemNameId + /market/itemordershistogram
+// flow is dead. The orderbook (highest buy / lowest sell) is now embedded in
+// the page's inline SSR react-query cache, so a single listing-page fetch gives
+// us everything. See ssrParser.js.
+//
+// Returns prices in currency units (e.g. 1.40), matching the old
+// getItemOrdersHistogram return value, or null when unavailable.
+const getListingOrderbook = async (appId, marketHashName) => {
     const url = `https://steamcommunity.com/market/listings/${appId}/${encodeURIComponent(marketHashName)}`;
 
     const response = await getRequest(url, {
@@ -1141,46 +1185,26 @@ const getItemNameId = async (appId, marketHashName) => {
 
     if (!response) return null;
 
-    // Extract item_nameid from the page HTML
-    const match = response.match(/Market_LoadOrderSpread\(\s*(\d+)\s*\)/);
-    if (match && match[1]) {
-        const nameId = match[1];
-
-        // Store in database for future use
-        await storeItemNameIdToDb(appId, marketHashName, nameId);
-
-        return nameId;
+    let parsed;
+    try {
+        parsed = parseSSRListing(response);
+    } catch (e) {
+        logger.warn(
+            `getListingOrderbook() failed to parse SSR for ${appId}/${marketHashName}: ${e.message}`,
+        );
+        return null;
     }
 
-    return null;
-};
-
-const getItemOrdersHistogram = async (itemNameId, currency) => {
-    const url = new URL(
-        "https://steamcommunity.com/market/itemordershistogram",
-    );
-    url.searchParams.append("country", countryCode || "US");
-    url.searchParams.append("language", "english");
-    url.searchParams.append("currency", CURRENCY_CODES[currency]);
-    url.searchParams.append("item_nameid", itemNameId);
-
-    const response = responseToJSON(
-        await getRequest(url.href, {
-            Referer: "https://steamcommunity.com/market/",
-            "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
-        }).catch((e) => {
-            console.error(e);
-            return {};
-        }),
-    );
-
-    if (response?.success === 1 && response?.highest_buy_order) {
-        // highest_buy_order is in cents
-        return Number(response.highest_buy_order) / 100;
-    }
-
-    return null;
+    const ob = parsed.orderbook;
+    // amtMaxBuyOrder / amtMinSellOrder are integer cents in the SSR cache.
+    return {
+        highestBuyOrder:
+            ob.amtMaxBuyOrder != null ? Number(ob.amtMaxBuyOrder) / 100 : null,
+        lowestSellOrder:
+            ob.amtMinSellOrder != null ? Number(ob.amtMinSellOrder) / 100 : null,
+        buyOrderCount: ob.cBuyOrders ?? 0,
+        sellOrderCount: ob.cSellOrders ?? 0,
+    };
 };
 
 const getInventory = () =>
@@ -1421,20 +1445,98 @@ const buyGames = async (config, ownedApps, ownedAppsRealCount, wallet) => {
 
 const sellItems = async (config, wallet) => {
     const inventoryContent = await getInventory();
+    const { sellOptionsFlag } = config;
 
-    const backgrounds = inventoryContent.filter(
-        (item) => item.type.includes("Background") && item.marketable,
-    );
+    let items = [];
 
-    const emoticons = inventoryContent.filter(
-        (item) => item.type.includes("Emoticon") && item.marketable,
-    );
+    // Filter based on selected flags
+    // eslint-disable-next-line no-bitwise
+    if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.ALL_TRADING_CARDS) {
+        const allCards = inventoryContent.filter(
+            (item) => item.type.includes("Card") && item.marketable,
+        );
+        items.push(...allCards);
+    // eslint-disable-next-line no-bitwise
+    } else {
+        // eslint-disable-next-line no-bitwise
+        if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.NORMAL_TRADING_CARDS) {
+            const normalCards = inventoryContent.filter(
+                (item) => item.type.includes("Card") && !item.type.includes("Foil") && item.marketable,
+            );
+            items.push(...normalCards);
+        }
+        // eslint-disable-next-line no-bitwise
+        if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.FOIL_TRADING_CARDS) {
+            const foilCards = inventoryContent.filter(
+                (item) => item.type.includes("Card") && item.type.includes("Foil") && item.marketable,
+            );
+            items.push(...foilCards);
+        }
+    }
 
-    const tradingCards = inventoryContent.filter(
-        (item) => item.type.includes("Card") && item.marketable,
-    );
+    // eslint-disable-next-line no-bitwise
+    if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.BACKGROUNDS) {
+        const backgrounds = inventoryContent.filter(
+            (item) => item.type.includes("Background") && !item.type.includes("Profile") && item.marketable,
+        );
+        items.push(...backgrounds);
+    }
 
-    const items = [...backgrounds, ...emoticons, ...tradingCards];
+    // eslint-disable-next-line no-bitwise
+    if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.EMOTICONS) {
+        const emoticons = inventoryContent.filter(
+            (item) => item.type.includes("Emoticon") && item.marketable,
+        );
+        items.push(...emoticons);
+    }
+
+    // eslint-disable-next-line no-bitwise
+    if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.PROFILE_BACKGROUNDS) {
+        const profileBgs = inventoryContent.filter(
+            (item) => item.type.includes("Profile Background") && item.marketable,
+        );
+        items.push(...profileBgs);
+    }
+
+    // eslint-disable-next-line no-bitwise
+    if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.MINI_PROFILE_BACKGROUNDS) {
+        const miniBgs = inventoryContent.filter(
+            (item) => item.type.includes("Mini Profile Background") && item.marketable,
+        );
+        items.push(...miniBgs);
+    }
+
+    // eslint-disable-next-line no-bitwise
+    if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.STICKERS) {
+        const stickers = inventoryContent.filter(
+            (item) => item.type.includes("Sticker") && item.marketable,
+        );
+        items.push(...stickers);
+    }
+
+    // eslint-disable-next-line no-bitwise
+    if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.CHAT_EFFECTS) {
+        const chatEffects = inventoryContent.filter(
+            (item) => item.type.includes("Chat Effect") && item.marketable,
+        );
+        items.push(...chatEffects);
+    }
+
+    // eslint-disable-next-line no-bitwise
+    if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.ANIMATED_AVATARS) {
+        const animatedAvatars = inventoryContent.filter(
+            (item) => item.type.includes("Animated Avatar") && item.marketable,
+        );
+        items.push(...animatedAvatars);
+    }
+
+    // eslint-disable-next-line no-bitwise
+    if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.AVATAR_FRAMES) {
+        const avatarFrames = inventoryContent.filter(
+            (item) => item.type.includes("Avatar Frame") && item.marketable,
+        );
+        items.push(...avatarFrames);
+    }
 
     logger.info(
         `Starting to sell ${items.length} items (Instant Sell: ${config.instantSell ? "Yes" : "No"})...`,
@@ -1443,7 +1545,7 @@ const sellItems = async (config, wallet) => {
     const startTime = moment().valueOf();
     let totalPrice = 0;
     const priceCache = {};
-    const nameIdCache = {};
+    const orderbookCache = {};
     let skippedCount = 0;
     let soldCount = 0;
 
@@ -1490,30 +1592,29 @@ const sellItems = async (config, wallet) => {
 
         // Instant sell mode: sell to highest buy order
         if (instantSell) {
-            // Get item name ID
-            let nameId = nameIdCache[item.market_hash_name];
-            if (!nameId) {
-                nameId = await getItemNameId(item.appid, item.market_hash_name);
+            // Get the orderbook from the listing page's SSR cache (new market UI).
+            let orderbook = orderbookCache[item.market_hash_name];
+            if (!orderbook) {
+                orderbook = await getListingOrderbook(
+                    item.appid,
+                    item.market_hash_name,
+                );
                 await sleep(100);
 
-                if (!nameId) {
+                if (!orderbook) {
                     logger.warn(
-                        `[${i + 1}/${items.length}] Could not get name ID for ${item.market_hash_name}, skipping`,
+                        `[${i + 1}/${items.length}] Could not get orderbook for ${item.market_hash_name}, skipping`,
                     );
                     skippedCount += 1;
                     // eslint-disable-next-line no-continue
                     continue;
                 }
 
-                nameIdCache[item.market_hash_name] = nameId;
+                orderbookCache[item.market_hash_name] = orderbook;
             }
 
-            // Get highest buy order
-            const highestBuyOrder = await getItemOrdersHistogram(
-                nameId,
-                wallet.currency,
-            );
-            await sleep(100);
+            // Get highest buy order (in currency units, e.g. 1.40)
+            const highestBuyOrder = orderbook.highestBuyOrder;
 
             if (!highestBuyOrder || highestBuyOrder === 0) {
                 logger.warn(
@@ -1643,15 +1744,49 @@ const turnIntoGems = async (config, wallet) =>
     // biome-ignore lint/suspicious/noAsyncPromiseExecutor: <explanation>
     new Promise(async (resolve) => {
         const inventoryContent = await getInventory();
+        const { sellOptionsFlag } = config;
 
-        const itemToGems = inventoryContent.filter(
-            (item) =>
-                (item.type.includes("Background") ||
-                    item.type.includes("Emoticon")) &&
-                item.owner_actions.find(
-                    (action) => action.name === "Turn into Gems...",
-                ),
+        let itemToGems = [];
+
+        // Filter based on selected flags - only items that can be turned into gems
+        const canTurnToGems = (item) => item.owner_actions?.find(
+            (action) => action.name === "Turn into Gems...",
         );
+
+        // eslint-disable-next-line no-bitwise
+        if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.BACKGROUNDS) {
+            const backgrounds = inventoryContent.filter(
+                (item) => item.type.includes("Background") && !item.type.includes("Profile") && canTurnToGems(item),
+            );
+            itemToGems.push(...backgrounds);
+        }
+
+        // eslint-disable-next-line no-bitwise
+        if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.EMOTICONS) {
+            const emoticons = inventoryContent.filter(
+                (item) => item.type.includes("Emoticon") && canTurnToGems(item),
+            );
+            itemToGems.push(...emoticons);
+        }
+
+        // eslint-disable-next-line no-bitwise
+        if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.PROFILE_BACKGROUNDS) {
+            const profileBgs = inventoryContent.filter(
+                (item) => item.type.includes("Profile Background") && canTurnToGems(item),
+            );
+            itemToGems.push(...profileBgs);
+        }
+
+        // eslint-disable-next-line no-bitwise
+        if (sellOptionsFlag & EXTRA_OPTIONS.SELLING.MINI_PROFILE_BACKGROUNDS) {
+            const miniBgs = inventoryContent.filter(
+                (item) => item.type.includes("Mini Profile Background") && canTurnToGems(item),
+            );
+            itemToGems.push(...miniBgs);
+        }
+
+        // Note: Trading cards, stickers, chat effects, avatars, and frames typically cannot be turned into gems
+        // so we don't include them here even if selected
 
         // const bar = new cliProgress.SingleBar(
         //     {

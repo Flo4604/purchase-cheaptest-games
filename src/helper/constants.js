@@ -10,6 +10,14 @@ const EXTRA_OPTIONS = {
     ALL_TRADING_CARDS: 1 << 2,
     NORMAL_TRADING_CARDS: 1 << 3,
     FOIL_TRADING_CARDS: 1 << 4,
+    BACKGROUNDS: 1 << 5,
+    EMOTICONS: 1 << 6,
+    PROFILE_BACKGROUNDS: 1 << 7,
+    MINI_PROFILE_BACKGROUNDS: 1 << 8,
+    STICKERS: 1 << 9,
+    CHAT_EFFECTS: 1 << 10,
+    ANIMATED_AVATARS: 1 << 11,
+    AVATAR_FRAMES: 1 << 12,
   },
 };
 
@@ -40,6 +48,14 @@ const TRANSLATION = {
   FOIL_TRADING_CARDS: "Foil Trading Cards",
   NORMAL_TRADING_CARDS: "Normal Trading Cards",
   ALL_TRADING_CARDS: "All Trading Cards",
+  BACKGROUNDS: "Backgrounds",
+  EMOTICONS: "Emoticons",
+  PROFILE_BACKGROUNDS: "Profile Backgrounds",
+  MINI_PROFILE_BACKGROUNDS: "Mini Profile Backgrounds",
+  STICKERS: "Stickers",
+  CHAT_EFFECTS: "Chat Effects",
+  ANIMATED_AVATARS: "Animated Avatars",
+  AVATAR_FRAMES: "Avatar Frames",
 };
 
 export {
