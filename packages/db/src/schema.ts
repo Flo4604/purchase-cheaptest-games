@@ -29,10 +29,6 @@ export const account = sqliteTable("Account", {
 	dekNonce: text("dekNonce"),
 	encryptedRefreshToken: text("encryptedRefreshToken"),
 	tokenNonce: text("tokenNonce"),
-	// LEGACY plaintext tokens — reference CLI only. Now nullable; dropped at
-	// web-app parity when the CLI is retired.
-	accessToken: text("accessToken"),
-	refreshToken: text("refreshToken"),
 	limit: text("limit").notNull().default("0"),
 	usage: text("usage").notNull().default("max"),
 	maxPrice: real("maxPrice").notNull().default(0),

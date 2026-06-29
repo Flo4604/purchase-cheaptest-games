@@ -24,5 +24,5 @@ export const createRouter = (ctx: AppContext) =>
 		HttpRouter.get("/accounts/:id/jobs", jobs.listJobs(ctx)),
 		HttpRouter.get("/jobs/:id", jobs.getJob(ctx)),
 		HttpRouter.post("/jobs/:id/cancel", jobs.cancelJob(ctx)),
-		HttpRouter.get("/jobs/:id/stream", jobs.streamJob(ctx)),
+		// GET /jobs/:id/stream is a WebSocket upgrade handled in http/ws.ts.
 	);

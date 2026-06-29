@@ -11,7 +11,6 @@
 		"lint": "biome check .",
 		"format": "biome format --write .",
 		"engine": "pnpm --filter @psg/engine dev",
-		"cli": "pnpm --filter @psg/cli start",
 		"web": "pnpm --filter @psg/web dev",
 		"db:push": "pnpm --filter @psg/db db:push",
 		"db:generate": "pnpm --filter @psg/db db:generate",

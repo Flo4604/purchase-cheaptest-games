@@ -26,9 +26,11 @@
 		"steam-user": "^5.2.3",
 		"steamcommunity": "^3.48.8",
 		"steamid": "^2.1.0",
-		"steamstore": "^2.4.0"
+		"steamstore": "^2.4.0",
+		"ws": "^8.18.0"
 	},
 	"devDependencies": {
-		"@types/qs": "^6.9.18"
+		"@types/qs": "^6.9.18",
+		"@types/ws": "^8.5.13"
 	}
 }
