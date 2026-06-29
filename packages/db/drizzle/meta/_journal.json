@@ -1,40 +1,12 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "6",
-      "when": 1782662625793,
-      "tag": "0000_calm_omega_flight",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1782684470970,
-      "tag": "0001_illegal_marauders",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1782685797231,
-      "tag": "0002_shocking_marrow",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1782731418109,
-      "tag": "0003_cold_marvel_boy",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1782737625660,
-      "tag": "0004_rapid_random",
+      "version": "7",
+      "when": 1782746222336,
+      "tag": "0000_rich_nitro",
       "breakpoints": true
     }
   ]

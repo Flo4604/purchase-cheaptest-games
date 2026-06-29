@@ -5,6 +5,9 @@ node_modules
 .output
 .tanstack
 dist
+# Embedded pglite (dev) data dir
+.pgdata
+**/.pgdata
 # TanStack Router generated route tree
 apps/web/src/routeTree.gen.ts
 # Keep environment variables out of version control

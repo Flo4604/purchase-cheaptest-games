@@ -1,40 +1,44 @@
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+	boolean,
+	integer,
+	pgTable,
+	real,
+	serial,
+	text,
+	timestamp,
+} from "drizzle-orm/pg-core";
 
-// Schema mirrors the existing (Prisma-created) SQLite tables exactly so we can
-// keep querying the same db file. Notes on encoding compatibility:
-//   - booleans were stored by Prisma as 0/1   -> integer({ mode: "boolean" })
-//   - DateTime was stored as epoch ms integers -> integer({ mode: "timestamp_ms" })
-// Table names keep their original PascalCase.
+// Postgres schema (runs on embedded pglite in dev, real Postgres in prod —
+// same dialect, picked by DATABASE_URL in client.ts).
 
 // Owns Steam accounts. Stores only password-derived material — never the KEK
-// (which is derived from the password at login and held in memory only).
-export const user = sqliteTable("User", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
+// (derived from the password at login, held in memory only).
+export const user = pgTable("User", {
+	id: serial("id").primaryKey(),
 	email: text("email").notNull().unique(),
 	authHash: text("authHash").notNull(),
 	saltAuth: text("saltAuth").notNull(),
 	saltKek: text("saltKek").notNull(),
-	createdAt: integer("createdAt", { mode: "timestamp_ms" })
+	createdAt: timestamp("createdAt", { withTimezone: true })
 		.notNull()
 		.$defaultFn(() => new Date()),
 });
 
-export const account = sqliteTable("Account", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
+export const account = pgTable("Account", {
+	id: serial("id").primaryKey(),
 	username: text("username").notNull().unique(),
 	// Web (zero-knowledge) path: the Steam refresh token is envelope-encrypted
-	// under the user's KEK (@psg/crypto). Nullable so legacy CLI rows are valid.
+	// under the user's KEK (@psg/crypto).
 	userId: integer("userId").references(() => user.id),
 	wrappedDek: text("wrappedDek"),
 	dekNonce: text("dekNonce"),
 	encryptedRefreshToken: text("encryptedRefreshToken"),
 	tokenNonce: text("tokenNonce"),
-	// Cached read-only display values, refreshed by a "refresh" job (needs a
-	// Steam login). Shown on the dashboard without re-logging-in every render.
+	// Cached read-only display values, refreshed by a "refresh" job.
 	cachedWalletBalance: real("cachedWalletBalance"),
 	cachedWalletCurrency: text("cachedWalletCurrency"),
 	cachedOwnedCount: integer("cachedOwnedCount"),
-	cachedAt: integer("cachedAt", { mode: "timestamp_ms" }),
+	cachedAt: timestamp("cachedAt", { withTimezone: true }),
 	limit: text("limit").notNull().default("0"),
 	usage: text("usage").notNull().default("max"),
 	maxPrice: real("maxPrice").notNull().default(0),
@@ -42,50 +46,49 @@ export const account = sqliteTable("Account", {
 	mode: text("mode").notNull().default("buy"),
 });
 
-export const app = sqliteTable("App", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
+// id is the Steam appId (set explicitly on insert), not auto-generated.
+export const app = pgTable("App", {
+	id: integer("id").primaryKey(),
 	name: text("name").notNull(),
 	subId: integer("subId").notNull(),
 	snr: text("snr").notNull(),
 	originatingSnr: text("originatingSnr").notNull(),
 	price: real("price").notNull(),
-	limited: integer("limited", { mode: "boolean" }).notNull().default(false),
-	hasTradingCards: integer("hasTradingCards", { mode: "boolean" })
-		.notNull()
-		.default(false),
-	isBundle: integer("isBundle", { mode: "boolean" }).notNull().default(false),
+	limited: boolean("limited").notNull().default(false),
+	hasTradingCards: boolean("hasTradingCards").notNull().default(false),
+	isBundle: boolean("isBundle").notNull().default(false),
 });
 
-export const bundleApp = sqliteTable("BundleApp", {
-	bundleId: integer("bundleId").primaryKey({ autoIncrement: true }),
+export const bundleApp = pgTable("BundleApp", {
+	bundleId: serial("bundleId").primaryKey(),
 	appId: integer("appId").notNull(),
 });
 
 // Backs the job queue, history, and resumable progress (WEBAPP_PLAN §4/§6).
-export const job = sqliteTable("Job", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
+export const job = pgTable("Job", {
+	id: serial("id").primaryKey(),
 	accountId: integer("accountId")
 		.notNull()
 		.references(() => account.id),
-	type: text("type").notNull(), // buy|sell|cleanup|gems|redeem|activate
-	status: text("status").notNull().default("queued"), // queued|running|done|failed|canceled
+	type: text("type").notNull(), // buy|sell|cleanup|gems|redeem|activate|refresh
+	status: text("status").notNull().default("queued"),
 	paramsJson: text("paramsJson"),
 	progressJson: text("progressJson"),
 	error: text("error"),
-	createdAt: integer("createdAt", { mode: "timestamp_ms" })
+	createdAt: timestamp("createdAt", { withTimezone: true })
 		.notNull()
 		.$defaultFn(() => new Date()),
-	finishedAt: integer("finishedAt", { mode: "timestamp_ms" }),
+	finishedAt: timestamp("finishedAt", { withTimezone: true }),
 });
 
-export const activatedKey = sqliteTable("ActivatedKey", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
+export const activatedKey = pgTable("ActivatedKey", {
+	id: serial("id").primaryKey(),
 	productKey: text("productKey").notNull().unique(),
 	accountId: integer("accountId").notNull(),
-	activatedAt: integer("activatedAt", { mode: "timestamp_ms" })
+	activatedAt: timestamp("activatedAt", { withTimezone: true })
 		.notNull()
 		.$defaultFn(() => new Date()),
-	success: integer("success", { mode: "boolean" }).notNull(),
+	success: boolean("success").notNull(),
 	packageId: text("packageId"),
 	errorMessage: text("errorMessage"),
 });

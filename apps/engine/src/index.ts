@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { HttpMiddleware, HttpServer } from "@effect/platform";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
+import { runMigrations } from "@psg/db";
 import { Layer } from "effect";
 import { createAppContext } from "./http/context.js";
 import { createRouter } from "./http/router.js";
@@ -20,6 +21,10 @@ const WS_PORT = Number(process.env.WS_PORT ?? 3102);
 const CONCURRENCY = Number(process.env.JOB_CONCURRENCY ?? 4);
 
 // Process-wide singletons (job queue, KEK store, sessions) + the API router.
+// Apply pending migrations on boot (pglite in dev, real Postgres in prod) so
+// `pnpm dev` needs no separate DB setup step.
+await runMigrations();
+
 const ctx = createAppContext(CONCURRENCY);
 const router = createRouter(ctx);
 

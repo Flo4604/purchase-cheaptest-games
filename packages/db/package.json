@@ -17,8 +17,9 @@
 		"db:studio": "drizzle-kit studio"
 	},
 	"dependencies": {
-		"@libsql/client": "^0.14.0",
-		"drizzle-orm": "^0.36.4"
+		"@electric-sql/pglite": "^0.5.0",
+		"drizzle-orm": "^0.36.4",
+		"postgres": "^3.4.9"
 	},
 	"devDependencies": {
 		"drizzle-kit": "^0.28.1"
