@@ -1,65 +1,17 @@
-import { createPasswordRecord, deriveKek, verifyPassword } from "@psg/crypto";
 import { db, user } from "@psg/db";
 import { eq } from "drizzle-orm";
 
 export type User = typeof user.$inferSelect;
 
-export interface AuthResult {
-	readonly user: User;
-	/** The KEK, derived from the password at login. Hold in memory only. */
-	readonly kek: Buffer;
-}
-
-/** Register a new user. Stores only password-derived material (never the KEK). */
-export const registerUser = async (
-	email: string,
-	password: string,
-): Promise<User> => {
-	const rec = await createPasswordRecord(password);
-	const rows = await db
-		.insert(user)
-		.values({
-			email,
-			authHash: rec.authHash,
-			saltAuth: rec.saltAuth,
-			saltKek: rec.saltKek,
-		})
-		.returning();
+/** Find the user for a SteamID (the QR login identity), creating one if needed. */
+export const findOrCreateUser = async (steamId: string): Promise<User> => {
+	const existing = (
+		await db.select().from(user).where(eq(user.steamId, steamId))
+	)[0];
+	if (existing) return existing;
+	const rows = await db.insert(user).values({ steamId }).returning();
 	return rows[0] as User;
 };
 
-/** Verify a login. On success returns the user + the freshly derived KEK; the
- * caller stashes the KEK in the in-memory KeyStore for the session lifetime. */
-export const authenticate = async (
-	email: string,
-	password: string,
-): Promise<AuthResult | null> => {
-	const rows = await db.select().from(user).where(eq(user.email, email));
-	const u = rows[0];
-	if (!u) return null;
-
-	const ok = await verifyPassword(password, {
-		saltAuth: u.saltAuth,
-		authHash: u.authHash,
-	});
-	if (!ok) return null;
-
-	const kek = await deriveKek(password, u.saltKek);
-	return { user: u, kek };
-};
-
-/** Re-derive the KEK for an already-identified user (the /unlock route, after a
- * KEK has expired from the in-memory store). Returns null if the password fails. */
-export const unlockUser = async (
-	userId: number,
-	password: string,
-): Promise<Buffer | null> => {
-	const u = (await db.select().from(user).where(eq(user.id, userId)))[0];
-	if (!u) return null;
-	const ok = await verifyPassword(password, {
-		saltAuth: u.saltAuth,
-		authHash: u.authHash,
-	});
-	if (!ok) return null;
-	return deriveKek(password, u.saltKek);
-};
+export const getUser = async (id: number): Promise<User | null> =>
+	(await db.select().from(user).where(eq(user.id, id)))[0] ?? null;

@@ -12,7 +12,5 @@
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"build": "tsc --noEmit -p tsconfig.json"
 	},
-	"dependencies": {
-		"argon2": "^0.44.0"
-	}
+	"dependencies": {}
 }

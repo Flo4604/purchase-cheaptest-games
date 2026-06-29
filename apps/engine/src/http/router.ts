@@ -5,7 +5,7 @@ import * as accounts from "./handlers/accounts.js";
 import * as auth from "./handlers/auth.js";
 import * as jobs from "./handlers/jobs.js";
 
-// API surface per WEBAPP_PLAN §7.
+// API surface. Auth is Steam QR only (no email/password).
 export const createRouter = (ctx: AppContext) =>
 	HttpRouter.empty.pipe(
 		HttpRouter.get(
@@ -14,13 +14,14 @@ export const createRouter = (ctx: AppContext) =>
 				Effect.orDie,
 			),
 		),
-		HttpRouter.post("/auth/register", auth.register(ctx)),
-		HttpRouter.post("/auth/login", auth.login(ctx)),
+		// Steam QR login (and add-account when already signed in)
+		HttpRouter.post("/auth/qr/start", auth.qrStart(ctx)),
+		HttpRouter.get("/auth/qr/:qrId", auth.qrStatus(ctx)),
 		HttpRouter.post("/auth/logout", auth.logout(ctx)),
-		HttpRouter.post("/accounts", accounts.addAccount(ctx)),
+		// Accounts
 		HttpRouter.get("/accounts", accounts.listAccounts(ctx)),
-		HttpRouter.post("/accounts/:id/unlock", accounts.unlock(ctx)),
 		HttpRouter.post("/accounts/:id/refresh", accounts.refresh(ctx)),
+		// Jobs
 		HttpRouter.post("/accounts/:id/jobs", jobs.startJob(ctx)),
 		HttpRouter.get("/accounts/:id/jobs", jobs.listJobs(ctx)),
 		HttpRouter.get("/jobs/:id", jobs.getJob(ctx)),

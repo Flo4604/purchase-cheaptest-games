@@ -3,13 +3,13 @@
 
 export interface Account {
 	id: number;
+	steamId: string;
 	username: string;
 	limit: string;
 	usage: string;
 	maxPrice: number;
 	priceOptionsFlag: number;
 	mode: string;
-	hasSealedToken: boolean;
 	cachedWalletBalance: number | null;
 	cachedWalletCurrency: string | null;
 	cachedOwnedCount: number | null;
@@ -38,6 +38,8 @@ export interface ProgressEvent {
 
 export type JobType = "buy" | "sell" | "cleanup" | "gems" | "redeem" | "activate";
 
+export type QrStatus = "pending" | "authenticated" | "timeout" | "error";
+
 export class ApiError extends Error {
 	constructor(
 		readonly status: number,
@@ -59,35 +61,18 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
 	return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 };
 
-export interface UserInfo {
-	id: number;
-	email: string;
-}
-
 export const api = {
-	register: (email: string, password: string) =>
-		request<UserInfo>("/auth/register", {
+	// Steam QR login (and add-account when already signed in — the engine decides
+	// based on the session cookie).
+	qrStart: () =>
+		request<{ qrId: string; challengeUrl: string }>("/auth/qr/start", {
 			method: "POST",
-			body: JSON.stringify({ email, password }),
 		}),
-	login: (email: string, password: string) =>
-		request<UserInfo>("/auth/login", {
-			method: "POST",
-			body: JSON.stringify({ email, password }),
-		}),
+	qrStatus: (qrId: string) =>
+		request<{ status: QrStatus }>(`/auth/qr/${qrId}`),
 	logout: () => request<{ ok: true }>("/auth/logout", { method: "POST" }),
 
 	listAccounts: () => request<Account[]>("/accounts"),
-	addAccount: (input: {
-		username: string;
-		refreshToken: string;
-		config?: Record<string, unknown>;
-	}) => request<Account>("/accounts", { method: "POST", body: JSON.stringify(input) }),
-	unlock: (accountId: number, password: string) =>
-		request<{ ok: true }>(`/accounts/${accountId}/unlock`, {
-			method: "POST",
-			body: JSON.stringify({ password }),
-		}),
 	refreshAccount: (accountId: number) =>
 		request<{ jobId: number }>(`/accounts/${accountId}/refresh`, {
 			method: "POST",

@@ -40,18 +40,13 @@ export const startJob = (ctx: AppContext) =>
 
 		const result = yield* Effect.either(
 			Effect.tryPromise(() =>
-				ctx.jobs.start(
-					accountId,
-					session.sessionId,
-					type,
-					(jobParams ?? {}) as Record<string, unknown>,
-				),
+				ctx.jobs.start(accountId, type, (jobParams ?? {}) as Record<string, unknown>),
 			),
 		);
 		if (Either.isLeft(result))
 			return yield* jsonResponse(
 				{ error: String((result.left as Error)?.message ?? result.left) },
-				423,
+				500,
 			);
 		return yield* jsonResponse({ jobId: result.right }, 202);
 	});

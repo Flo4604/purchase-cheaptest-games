@@ -1,39 +1,43 @@
 import { openToken, sealToken } from "@psg/crypto";
 import { account, db } from "@psg/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { MASTER_KEY } from "./serverKey.js";
 
 export type Account = typeof account.$inferSelect;
 
-export interface AccountConfigInput {
-	limit?: string;
-	usage?: string;
-	maxPrice?: number;
-	priceOptionsFlag?: number;
-	mode?: string;
-}
-
-/** Add a Steam account for a user: envelope-encrypt the refresh token under the
- * user's KEK and store only ciphertext. */
-export const addSteamAccount = async (
+/** Connect (or re-link) a Steam account for a user: envelope-encrypt the refresh
+ * token under the server master key. Upserts by (userId, steamId). */
+export const connectAccount = async (
 	userId: number,
-	kek: Buffer,
+	steamId: string,
 	username: string,
 	refreshToken: string,
-	config: AccountConfigInput = {},
 ): Promise<Account> => {
-	const sealed = sealToken(kek, refreshToken);
-	const rows = await db
-		.insert(account)
-		.values({
-			userId,
-			username,
-			wrappedDek: sealed.wrappedDek,
-			dekNonce: sealed.dekNonce,
-			encryptedRefreshToken: sealed.encryptedToken,
-			tokenNonce: sealed.tokenNonce,
-			...config,
-		})
-		.returning();
+	const sealed = sealToken(MASTER_KEY, refreshToken);
+	const tokenCols = {
+		wrappedDek: sealed.wrappedDek,
+		dekNonce: sealed.dekNonce,
+		encryptedRefreshToken: sealed.encryptedToken,
+		tokenNonce: sealed.tokenNonce,
+	};
+
+	const existing = (
+		await db
+			.select()
+			.from(account)
+			.where(and(eq(account.userId, userId), eq(account.steamId, steamId)))
+	)[0];
+
+	const rows = existing
+		? await db
+				.update(account)
+				.set({ username, ...tokenCols })
+				.where(eq(account.id, existing.id))
+				.returning()
+		: await db
+				.insert(account)
+				.values({ userId, steamId, username, ...tokenCols })
+				.returning();
 	return rows[0] as Account;
 };
 
@@ -42,8 +46,8 @@ type SealedColumns = Pick<
 	"wrappedDek" | "dekNonce" | "encryptedRefreshToken" | "tokenNonce"
 >;
 
-/** Decrypt an account's Steam refresh token with the in-memory KEK. */
-export const getAccountRefreshToken = (acct: SealedColumns, kek: Buffer): string => {
+/** Decrypt an account's Steam refresh token with the server master key. */
+export const getAccountRefreshToken = (acct: SealedColumns): string => {
 	if (
 		!acct.wrappedDek ||
 		!acct.dekNonce ||
@@ -52,7 +56,7 @@ export const getAccountRefreshToken = (acct: SealedColumns, kek: Buffer): string
 	) {
 		throw new Error("account has no sealed refresh token");
 	}
-	return openToken(kek, {
+	return openToken(MASTER_KEY, {
 		wrappedDek: acct.wrappedDek,
 		dekNonce: acct.dekNonce,
 		encryptedToken: acct.encryptedRefreshToken,
@@ -60,13 +64,12 @@ export const getAccountRefreshToken = (acct: SealedColumns, kek: Buffer): string
 	});
 };
 
-/** Re-seal a rotated refresh token (steam-session refresh) under the same KEK. */
+/** Re-seal a rotated refresh token (steam-session refresh) under the master key. */
 export const updateAccountToken = async (
 	accountId: number,
-	kek: Buffer,
 	refreshToken: string,
 ): Promise<void> => {
-	const sealed = sealToken(kek, refreshToken);
+	const sealed = sealToken(MASTER_KEY, refreshToken);
 	await db
 		.update(account)
 		.set({

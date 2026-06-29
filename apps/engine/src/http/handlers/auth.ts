@@ -1,61 +1,52 @@
-import { HttpServerRequest } from "@effect/platform";
-import { Effect, Either, Schema } from "effect";
-import { authenticate, registerUser } from "../../auth/index.js";
+import { HttpRouter } from "@effect/platform";
+import { Effect } from "effect";
+import { connectAccount, findOrCreateUser } from "../../auth/index.js";
 import type { AppContext } from "../context.js";
-import { badRequest, jsonResponse, jsonWithCookie } from "../respond.js";
+import { jsonResponse, jsonWithCookie, notFound } from "../respond.js";
 import { COOKIE_NAME, cookieOptions, getSession } from "../session.js";
 
-const Credentials = Schema.Struct({
-	email: Schema.String,
-	password: Schema.String,
-});
-
-export const register = (ctx: AppContext) =>
+// POST /auth/qr/start — begin a Steam QR login. If already signed in, the scan
+// instead connects an additional account to the current user.
+export const qrStart = (ctx: AppContext) =>
 	Effect.gen(function* () {
-		const parsed = yield* Effect.either(
-			HttpServerRequest.schemaBodyJson(Credentials),
+		const session = yield* getSession(ctx);
+		const started = yield* Effect.tryPromise(() =>
+			ctx.qr.start(session?.userId),
 		);
-		if (Either.isLeft(parsed)) return yield* badRequest();
-		const { email, password } = parsed.right;
-
-		const created = yield* Effect.either(
-			Effect.tryPromise(() => registerUser(email, password)),
-		);
-		if (Either.isLeft(created))
-			return yield* jsonResponse({ error: "email already registered" }, 409);
-
-		// auto-login: derive KEK + mint session
-		const auth = yield* Effect.tryPromise(() => authenticate(email, password));
-		if (!auth) return yield* jsonResponse({ error: "registration failed" }, 500);
-		const sid = ctx.sessions.create(auth.user.id);
-		ctx.keys.set(sid, auth.kek);
-		return yield* jsonWithCookie(
-			{ id: auth.user.id, email: auth.user.email },
-			201,
-			COOKIE_NAME,
-			sid,
-			cookieOptions,
-		);
+		return yield* jsonResponse(started); // { qrId, challengeUrl }
 	});
 
-export const login = (ctx: AppContext) =>
+// GET /auth/qr/:qrId — poll status. On the first "authenticated" we finalize:
+// fresh login → find/create the user + set a session cookie; add-account → just
+// attach the scanned account to the signed-in user.
+export const qrStatus = (ctx: AppContext) =>
 	Effect.gen(function* () {
-		const parsed = yield* Effect.either(
-			HttpServerRequest.schemaBodyJson(Credentials),
-		);
-		if (Either.isLeft(parsed)) return yield* badRequest();
-		const { email, password } = parsed.right;
+		const params = yield* HttpRouter.params;
+		const entry = ctx.qr.get(params.qrId ?? "");
+		if (!entry) return yield* notFound("unknown qr session");
 
-		const auth = yield* Effect.either(
-			Effect.tryPromise(() => authenticate(email, password)),
-		);
-		if (Either.isLeft(auth) || !auth.right)
-			return yield* jsonResponse({ error: "invalid credentials" }, 401);
+		if (entry.status !== "authenticated" || !entry.result) {
+			return yield* jsonResponse({ status: entry.status });
+		}
 
-		const sid = ctx.sessions.create(auth.right.user.id);
-		ctx.keys.set(sid, auth.right.kek);
+		const { steamId, accountName, refreshToken } = entry.result;
+
+		if (entry.initiatingUserId != null) {
+			yield* Effect.promise(() =>
+				connectAccount(entry.initiatingUserId!, steamId, accountName, refreshToken),
+			);
+			ctx.qr.consume(params.qrId ?? "");
+			return yield* jsonResponse({ status: "authenticated" });
+		}
+
+		const user = yield* Effect.promise(() => findOrCreateUser(steamId));
+		yield* Effect.promise(() =>
+			connectAccount(user.id, steamId, accountName, refreshToken),
+		);
+		const sid = ctx.sessions.create(user.id);
+		ctx.qr.consume(params.qrId ?? "");
 		return yield* jsonWithCookie(
-			{ id: auth.right.user.id, email: auth.right.user.email },
+			{ status: "authenticated" },
 			200,
 			COOKIE_NAME,
 			sid,
@@ -66,10 +57,7 @@ export const login = (ctx: AppContext) =>
 export const logout = (ctx: AppContext) =>
 	Effect.gen(function* () {
 		const session = yield* getSession(ctx);
-		if (session) {
-			ctx.keys.wipe(session.sessionId);
-			ctx.sessions.destroy(session.sessionId);
-		}
+		if (session) ctx.sessions.destroy(session.sessionId);
 		return yield* jsonWithCookie({ ok: true }, 200, COOKIE_NAME, "", {
 			...cookieOptions,
 			maxAge: 0,

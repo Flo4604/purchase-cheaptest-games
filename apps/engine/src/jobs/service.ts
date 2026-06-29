@@ -2,7 +2,6 @@ import type { JobType } from "@psg/core";
 import { account, db, job as jobTable } from "@psg/db";
 import { desc, eq } from "drizzle-orm";
 import { getAccountRefreshToken } from "../auth/accounts.js";
-import type { KeyStore } from "../auth/keystore.js";
 import { SteamEngine } from "../steam/index.js";
 import type {
 	ActivateConfig,
@@ -28,7 +27,6 @@ export class JobService {
 	constructor(
 		readonly queue: JobQueue,
 		readonly hub: ProgressHub,
-		private readonly keys: KeyStore,
 	) {}
 
 	// Insert a Job row, enqueue it, and wire status persistence. The runner gets
@@ -58,24 +56,20 @@ export class JobService {
 		return inserted.id;
 	}
 
-	// Resolve the unlocked KEK + the account row, or throw.
-	private async prepare(accountId: number, sessionId: string) {
-		const kek = this.keys.get(sessionId);
-		if (!kek) throw new Error("locked: unlock the account with your password first");
+	private async loadAccount(accountId: number) {
 		const acct = (
 			await db.select().from(account).where(eq(account.id, accountId))
 		)[0];
 		if (!acct) throw new Error("account not found");
-		return { kek, acct };
+		return acct;
 	}
 
 	async start(
 		accountId: number,
-		sessionId: string,
 		type: JobType,
 		params: JobParams,
 	): Promise<number> {
-		const { kek, acct } = await this.prepare(accountId, sessionId);
+		const acct = await this.loadAccount(accountId);
 		return this.enqueue(
 			accountId,
 			type,
@@ -86,7 +80,7 @@ export class JobService {
 					await engine.login({
 						id: acct.id,
 						username: acct.username,
-						refreshToken: getAccountRefreshToken(acct, kek),
+						refreshToken: getAccountRefreshToken(acct),
 					});
 					const wallet = (await engine.getWalletBalance()) as Wallet;
 					await this.runFlow(engine, type, params, wallet);
@@ -98,8 +92,8 @@ export class JobService {
 	}
 
 	// Refresh cached wallet balance + owned-game count for the dashboard.
-	async startRefresh(accountId: number, sessionId: string): Promise<number> {
-		const { kek, acct } = await this.prepare(accountId, sessionId);
+	async startRefresh(accountId: number): Promise<number> {
+		const acct = await this.loadAccount(accountId);
 		return this.enqueue(accountId, "refresh", null, async (jobId) => {
 			const sink = new StreamingProgressSink(this.hub, jobId);
 			const engine = new SteamEngine(sink);
@@ -107,7 +101,7 @@ export class JobService {
 				await engine.login({
 					id: acct.id,
 					username: acct.username,
-					refreshToken: getAccountRefreshToken(acct, kek),
+					refreshToken: getAccountRefreshToken(acct),
 				});
 				sink.info("Fetching wallet balance and owned games…");
 				const wallet = (await engine.getWalletBalance()) as Wallet;

@@ -11,25 +11,24 @@ import {
 // Postgres schema (runs on embedded pglite in dev, real Postgres in prod —
 // same dialect, picked by DATABASE_URL in client.ts).
 
-// Owns Steam accounts. Stores only password-derived material — never the KEK
-// (derived from the password at login, held in memory only).
+// Identity = the Steam account you logged in with via QR (by SteamID).
 export const user = pgTable("User", {
 	id: serial("id").primaryKey(),
-	email: text("email").notNull().unique(),
-	authHash: text("authHash").notNull(),
-	saltAuth: text("saltAuth").notNull(),
-	saltKek: text("saltKek").notNull(),
+	steamId: text("steamId").notNull().unique(),
 	createdAt: timestamp("createdAt", { withTimezone: true })
 		.notNull()
 		.$defaultFn(() => new Date()),
 });
 
+// A Steam account a user has connected (via QR). The refresh token is
+// envelope-encrypted under the server master key (@psg/crypto).
 export const account = pgTable("Account", {
 	id: serial("id").primaryKey(),
-	username: text("username").notNull().unique(),
-	// Web (zero-knowledge) path: the Steam refresh token is envelope-encrypted
-	// under the user's KEK (@psg/crypto).
-	userId: integer("userId").references(() => user.id),
+	userId: integer("userId")
+		.notNull()
+		.references(() => user.id),
+	steamId: text("steamId").notNull(),
+	username: text("username").notNull(),
 	wrappedDek: text("wrappedDek"),
 	dekNonce: text("dekNonce"),
 	encryptedRefreshToken: text("encryptedRefreshToken"),

@@ -1,7 +1,8 @@
 CREATE TABLE IF NOT EXISTS "Account" (
 	"id" serial PRIMARY KEY NOT NULL,
+	"userId" integer NOT NULL,
+	"steamId" text NOT NULL,
 	"username" text NOT NULL,
-	"userId" integer,
 	"wrappedDek" text,
 	"dekNonce" text,
 	"encryptedRefreshToken" text,
@@ -14,8 +15,7 @@ CREATE TABLE IF NOT EXISTS "Account" (
 	"usage" text DEFAULT 'max' NOT NULL,
 	"maxPrice" real DEFAULT 0 NOT NULL,
 	"priceOptionsFlag" integer DEFAULT 0 NOT NULL,
-	"mode" text DEFAULT 'buy' NOT NULL,
-	CONSTRAINT "Account_username_unique" UNIQUE("username")
+	"mode" text DEFAULT 'buy' NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "ActivatedKey" (
@@ -60,12 +60,9 @@ CREATE TABLE IF NOT EXISTS "Job" (
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "User" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"email" text NOT NULL,
-	"authHash" text NOT NULL,
-	"saltAuth" text NOT NULL,
-	"saltKek" text NOT NULL,
+	"steamId" text NOT NULL,
 	"createdAt" timestamp with time zone NOT NULL,
-	CONSTRAINT "User_email_unique" UNIQUE("email")
+	CONSTRAINT "User_steamId_unique" UNIQUE("steamId")
 );
 --> statement-breakpoint
 DO $$ BEGIN

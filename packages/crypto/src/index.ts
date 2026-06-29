@@ -1,9 +1,7 @@
-// Zero-knowledge envelope encryption for Steam refresh tokens (WEBAPP_PLAN §3).
-//
-//   password ──Argon2id(saltAuth)──▶ auth hash   (stored; login)
-//   password ──Argon2id(saltKek)───▶ KEK         (memory only; never stored)
+// Envelope encryption for Steam refresh tokens:
 //   random DEK ──AES-256-GCM──▶ encrypted token
-//   KEK        ──AES-256-GCM──▶ wrapped DEK
+//   master key ──AES-256-GCM──▶ wrapped DEK
+// The master key is server-managed (an env secret); sealing/opening take it as
+// an argument so this package stays pure.
 export * from "./types.js";
-export { createPasswordRecord, deriveKek, verifyPassword } from "./password.js";
 export { openToken, sealToken } from "./token.js";
