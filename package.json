@@ -6,7 +6,8 @@
 		"dev": "turbo run dev",
 		"build": "turbo run build",
 		"typecheck": "turbo run typecheck",
-		"test": "turbo run test",
+		"test": "vitest run",
+		"test:watch": "vitest",
 		"lint": "biome check .",
 		"format": "biome format --write .",
 		"engine": "pnpm --filter @psg/engine dev",
@@ -18,10 +19,12 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "1.8.3",
+		"@effect/vitest": "^0.29.0",
 		"@types/node": "^22.12.0",
 		"tsx": "^4.20.6",
 		"turbo": "^2.10.0",
-		"typescript": "^5.8.3"
+		"typescript": "^5.8.3",
+		"vitest": "^3.2.0"
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": ["@biomejs/biome", "@libsql/client", "argon2", "esbuild"]

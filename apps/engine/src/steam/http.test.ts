@@ -1,6 +1,6 @@
-import assert from "node:assert/strict";
-import { test } from "node:test";
-import { Effect, Either } from "effect";
+import { it } from "@effect/vitest";
+import { Effect, Either, Fiber, TestClock } from "effect";
+import { expect } from "vitest";
 import {
 	communityGet,
 	defaultHttpConfig,
@@ -20,57 +20,73 @@ const fastConfig = {
 	interval: "1 seconds" as const,
 };
 
-test("classifies a 429 as SteamRateLimited", async () => {
-	const community = fakeCommunity((cb) => cb({ message: "HTTP error 429" }, null, null));
-	const res = await Effect.runPromise(
-		Effect.either(communityGet(community, "http://x", {})),
-	);
-	assert.ok(Either.isLeft(res));
-	assert.equal(res.left._tag, "SteamRateLimited");
-});
+it.effect("classifies a 429 as SteamRateLimited", () =>
+	Effect.gen(function* () {
+		const community = fakeCommunity((cb) =>
+			cb({ message: "HTTP error 429" }, null, null),
+		);
+		const res = yield* Effect.either(communityGet(community, "http://x", {}));
+		expect(Either.isLeft(res)).toBe(true);
+		if (Either.isLeft(res)) expect(res.left._tag).toBe("SteamRateLimited");
+	}),
+);
 
-test("classifies other errors as SteamRequestFailed", async () => {
-	const community = fakeCommunity((cb) => cb({ message: "ECONNRESET" }, null, null));
-	const res = await Effect.runPromise(
-		Effect.either(communityGet(community, "http://x", {})),
-	);
-	assert.ok(Either.isLeft(res));
-	assert.equal(res.left._tag, "SteamRequestFailed");
-});
+it.effect("classifies other errors as SteamRequestFailed", () =>
+	Effect.gen(function* () {
+		const community = fakeCommunity((cb) =>
+			cb({ message: "ECONNRESET" }, null, null),
+		);
+		const res = yield* Effect.either(communityGet(community, "http://x", {}));
+		expect(Either.isLeft(res)).toBe(true);
+		if (Either.isLeft(res)) expect(res.left._tag).toBe("SteamRequestFailed");
+	}),
+);
 
-test("retries transient failures, then succeeds", async () => {
-	let calls = 0;
-	const community = fakeCommunity((cb) => {
-		calls += 1;
-		if (calls < 3) cb({ message: "HTTP error 429" }, null, null);
-		else cb(null, null, "OK");
-	});
-	const body = await Effect.runPromise(
-		Effect.provide(
-			harden(communityGet(community, "http://x", {}), { ...fastConfig, maxRetries: 5 }),
-			SteamLimiterLive(fastConfig),
-		),
-	);
-	assert.equal(body, "OK");
-	assert.equal(calls, 3); // 2 failures + 1 success
-});
-
-test("gives up after maxRetries on persistent failure", async () => {
-	let calls = 0;
-	const community = fakeCommunity((cb) => {
-		calls += 1;
-		cb({ message: "HTTP error 429" }, null, null);
-	});
-	const cfg = { ...fastConfig, maxRetries: 3 };
-	const res = await Effect.runPromise(
-		Effect.either(
+it.effect("retries transient failures, then succeeds", () =>
+	Effect.gen(function* () {
+		let calls = 0;
+		const community = fakeCommunity((cb) => {
+			calls += 1;
+			if (calls < 3) cb({ message: "HTTP error 429" }, null, null);
+			else cb(null, null, "OK");
+		});
+		const cfg = { ...fastConfig, maxRetries: 5 };
+		// Fork so we can drive the (virtual) TestClock past each backoff window.
+		const fiber = yield* Effect.fork(
 			Effect.provide(
 				harden(communityGet(community, "http://x", {}), cfg),
 				SteamLimiterLive(cfg),
 			),
-		),
-	);
-	assert.ok(Either.isLeft(res));
-	assert.equal(res.left._tag, "SteamRateLimited");
-	assert.equal(calls, 4); // 1 initial attempt + 3 retries
-});
+		);
+		yield* TestClock.adjust("1 minute");
+		const body = yield* Fiber.join(fiber);
+		expect(body).toBe("OK");
+		expect(calls).toBe(3); // 2 failures + 1 success
+	}),
+);
+
+it.effect("gives up after maxRetries on persistent failure", () =>
+	Effect.gen(function* () {
+		let calls = 0;
+		const community = fakeCommunity((cb) => {
+			calls += 1;
+			cb({ message: "HTTP error 429" }, null, null);
+		});
+		const cfg = { ...fastConfig, maxRetries: 3 };
+		// Fork the Either-wrapped effect (so the fiber never "fails"), drive the
+		// clock past all backoffs, then join and inspect the result.
+		const fiber = yield* Effect.fork(
+			Effect.either(
+				Effect.provide(
+					harden(communityGet(community, "http://x", {}), cfg),
+					SteamLimiterLive(cfg),
+				),
+			),
+		);
+		yield* TestClock.adjust("1 minute");
+		const res = yield* Fiber.join(fiber);
+		expect(Either.isLeft(res)).toBe(true);
+		if (Either.isLeft(res)) expect(res.left._tag).toBe("SteamRateLimited");
+		expect(calls).toBe(4); // 1 initial + 3 retries
+	}),
+);

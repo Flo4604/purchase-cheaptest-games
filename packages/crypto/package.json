@@ -10,8 +10,7 @@
 	"types": "./src/index.ts",
 	"scripts": {
 		"typecheck": "tsc --noEmit -p tsconfig.json",
-		"build": "tsc --noEmit -p tsconfig.json",
-		"test": "node --import tsx --test src/crypto.test.ts"
+		"build": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {
 		"argon2": "^0.44.0"

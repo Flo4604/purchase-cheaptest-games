@@ -1,13 +1,12 @@
-import assert from "node:assert/strict";
-import { test } from "node:test";
+import { expect, test } from "vitest";
 import { KeyStore } from "./keystore.js";
 
 test("stores and returns a KEK for a session", () => {
 	const store = new KeyStore();
 	const kek = Buffer.alloc(32, 7);
 	store.set("sess-1", kek);
-	assert.ok(store.get("sess-1")?.equals(kek));
-	assert.equal(store.get("unknown"), null);
+	expect(store.get("sess-1")?.equals(kek)).toBe(true);
+	expect(store.get("unknown")).toBeNull();
 });
 
 test("expires a KEK after the TTL", () => {
@@ -15,9 +14,9 @@ test("expires a KEK after the TTL", () => {
 	const store = new KeyStore(100, () => clock);
 	store.set("sess-1", Buffer.alloc(32, 7));
 	clock = 1099;
-	assert.ok(store.get("sess-1") !== null);
+	expect(store.get("sess-1")).not.toBeNull();
 	clock = 1101;
-	assert.equal(store.get("sess-1"), null);
+	expect(store.get("sess-1")).toBeNull();
 });
 
 test("wipe zeroes the key bytes and forgets the session", () => {
@@ -25,8 +24,8 @@ test("wipe zeroes the key bytes and forgets the session", () => {
 	const kek = Buffer.alloc(32, 7);
 	store.set("sess-1", kek);
 	store.wipe("sess-1");
-	assert.equal(store.get("sess-1"), null);
-	assert.ok(kek.equals(Buffer.alloc(32, 0))); // bytes zeroed in place
+	expect(store.get("sess-1")).toBeNull();
+	expect(kek.equals(Buffer.alloc(32, 0))).toBe(true); // bytes zeroed in place
 });
 
 test("wipeAll clears every session", () => {
@@ -34,6 +33,6 @@ test("wipeAll clears every session", () => {
 	store.set("a", Buffer.alloc(32, 1));
 	store.set("b", Buffer.alloc(32, 2));
 	store.wipeAll();
-	assert.equal(store.get("a"), null);
-	assert.equal(store.get("b"), null);
+	expect(store.get("a")).toBeNull();
+	expect(store.get("b")).toBeNull();
 });

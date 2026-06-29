@@ -7,8 +7,7 @@
 		"dev": "tsx watch src/index.ts",
 		"start": "tsx src/index.ts",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
-		"build": "tsc --noEmit -p tsconfig.json",
-		"test": "node --import tsx --test src/steam/http.test.ts src/auth/keystore.test.ts"
+		"build": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {
 		"@effect/platform": "^0.96.2",
