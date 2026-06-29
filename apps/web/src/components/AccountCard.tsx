@@ -4,37 +4,50 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { type Account, api } from "../lib/api.js";
 import { useJobStream } from "../lib/useJobStream.js";
-import { colors, font, space } from "../tokens.stylex";
-import { Button, Card } from "./ui.js";
+import { colors, font, radius, space } from "../tokens.stylex";
 import { JobLauncher } from "./JobLauncher.js";
+import { Modal } from "./Modal.js";
+import { Badge, Button, Card, Spinner, Stat, type Tone } from "./ui.js";
 
 const s = stylex.create({
-	head: { display: "flex", alignItems: "baseline", justifyContent: "space-between" },
-	name: { fontSize: "16px", fontWeight: 700, color: colors.text },
-	steamId: { fontSize: "11px", color: colors.muted, fontFamily: font.mono },
-	stats: { display: "flex", gap: space.lg, alignItems: "baseline" },
-	stat: { display: "flex", flexDirection: "column" },
-	statNum: { fontSize: "18px", fontWeight: 700, color: colors.text, fontFamily: font.mono },
-	statLabel: { fontSize: "11px", color: colors.muted, textTransform: "uppercase", letterSpacing: "0.5px" },
-	statSide: { marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: space.xs },
-	when: { fontSize: "11px", color: colors.muted },
-	meta: { display: "flex", gap: space.md, flexWrap: "wrap", fontSize: "13px", color: colors.muted, fontFamily: font.mono },
-	num: { color: colors.text },
-	jobLine: { display: "flex", gap: space.sm, alignItems: "center", fontSize: "13px", fontFamily: font.mono },
-	jobLink: { color: colors.accent, textDecoration: "none" },
-	dot: (c: string) => ({ color: c }),
+	head: { display: "flex", alignItems: "center", gap: space.md },
+	avatar: {
+		width: "40px",
+		height: "40px",
+		flexShrink: 0,
+		borderRadius: radius.md,
+		background: `linear-gradient(135deg, ${colors.accent}, #2d6fd6)`,
+		color: colors.onAccent,
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "center",
+		fontWeight: 800,
+		fontSize: "18px",
+	},
+	idCol: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 },
+	name: { fontSize: "16px", fontWeight: 700, color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+	steamId: { fontSize: "11px", color: colors.faint, fontFamily: font.mono },
+	stats: { display: "flex", gap: space.xl, alignItems: "center" },
+	statSide: { marginLeft: "auto" },
+	pills: { display: "flex", gap: "6px", flexWrap: "wrap" },
+	divider: { height: "1px", background: colors.border, margin: `${space.xs} 0` },
+	jobs: { display: "flex", flexDirection: "column", gap: "6px" },
+	jobsLabel: { fontSize: "10px", fontWeight: 600, color: colors.faint, textTransform: "uppercase", letterSpacing: "0.6px" },
+	jobLine: { display: "flex", alignItems: "center", gap: space.sm, fontSize: "13px", fontFamily: font.mono },
+	jobLink: { color: colors.text, textDecoration: "none", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 });
 
-const statusColor: Record<string, string> = {
-	queued: "#9aa3ad",
-	running: "#5b8cff",
-	done: "#4ade80",
-	failed: "#ff6b6b",
-	canceled: "#fbbf24",
+const jobTone: Record<string, Tone> = {
+	queued: "neutral",
+	running: "accent",
+	done: "success",
+	failed: "danger",
+	canceled: "warn",
 };
 
 export function AccountCard({ account }: { account: Account }) {
 	const qc = useQueryClient();
+	const [launching, setLaunching] = useState(false);
 	const [refreshJobId, setRefreshJobId] = useState<number | null>(null);
 
 	const jobs = useQuery({
@@ -42,8 +55,6 @@ export function AccountCard({ account }: { account: Account }) {
 		queryFn: () => api.listJobs(account.id),
 	});
 
-	// Refresh wallet/owned-count in place: start the refresh job, watch its WS
-	// stream, and pull the updated cached values when it finishes.
 	const refresh = useMutation({
 		mutationFn: () => api.refreshAccount(account.id),
 		onSuccess: ({ jobId }) => setRefreshJobId(jobId),
@@ -58,58 +69,62 @@ export function AccountCard({ account }: { account: Account }) {
 	const refreshing = refreshJobId !== null;
 
 	return (
-		<Card>
+		<Card hover>
 			<div {...stylex.props(s.head)}>
-				<span {...stylex.props(s.name)}>{account.username}</span>
-				<span {...stylex.props(s.steamId)}>{account.steamId}</span>
+				<div {...stylex.props(s.avatar)}>{account.username.charAt(0).toUpperCase()}</div>
+				<div {...stylex.props(s.idCol)}>
+					<span {...stylex.props(s.name)}>{account.username}</span>
+					<span {...stylex.props(s.steamId)}>{account.steamId}</span>
+				</div>
 			</div>
 
 			<div {...stylex.props(s.stats)}>
-				<div {...stylex.props(s.stat)}>
-					<span {...stylex.props(s.statNum)}>
-						{account.cachedWalletBalance != null
+				<Stat
+					value={
+						account.cachedWalletBalance != null
 							? `${account.cachedWalletBalance} ${account.cachedWalletCurrency ?? ""}`
-							: "—"}
-					</span>
-					<span {...stylex.props(s.statLabel)}>wallet</span>
-				</div>
-				<div {...stylex.props(s.stat)}>
-					<span {...stylex.props(s.statNum)}>{account.cachedOwnedCount ?? "—"}</span>
-					<span {...stylex.props(s.statLabel)}>games</span>
-				</div>
-				<div {...stylex.props(s.statSide)}>
-					<Button onClick={() => refresh.mutate()} disabled={refreshing || refresh.isPending}>
-						{refreshing ? "Refreshing…" : "Refresh"}
+							: "—"
+					}
+					label="wallet"
+				/>
+				<Stat value={account.cachedOwnedCount ?? "—"} label="games" />
+				<span {...stylex.props(s.statSide)}>
+					<Button size="sm" onClick={() => refresh.mutate()} disabled={refreshing || refresh.isPending}>
+						{refreshing ? <Spinner /> : "Refresh"}
 					</Button>
-					{account.cachedAt && (
-						<span {...stylex.props(s.when)}>
-							{new Date(account.cachedAt).toLocaleString()}
-						</span>
-					)}
-				</div>
+				</span>
 			</div>
 
-			<div {...stylex.props(s.meta)}>
-				<span>usage <span {...stylex.props(s.num)}>{account.usage}</span></span>
-				<span>limit <span {...stylex.props(s.num)}>{account.limit === "0" ? "∞" : account.limit}</span></span>
-				<span>maxPrice <span {...stylex.props(s.num)}>{account.maxPrice || "∞"}</span></span>
+			<div {...stylex.props(s.pills)}>
+				<Badge>{account.usage}</Badge>
+				<Badge>limit {account.limit === "0" ? "∞" : account.limit}</Badge>
+				<Badge>max {account.maxPrice || "∞"}</Badge>
 			</div>
 
-			<JobLauncher account={account} />
+			<Button variant="primary" onClick={() => setLaunching(true)}>
+				Run a flow
+			</Button>
 
 			{jobs.data && jobs.data.length > 0 && (
-				<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-					{jobs.data.slice(0, 5).map((j) => (
-						<div key={j.id} {...stylex.props(s.jobLine)}>
-							<span {...stylex.props(s.dot(statusColor[j.status] ?? colors.muted))}>●</span>
-							<Link to="/jobs/$jobId" params={{ jobId: String(j.id) }} {...stylex.props(s.jobLink)}>
-								#{j.id} {j.type}
-							</Link>
-							<span style={{ color: "#9aa3ad" }}>{j.status}</span>
-						</div>
-					))}
-				</div>
+				<>
+					<div {...stylex.props(s.divider)} />
+					<div {...stylex.props(s.jobs)}>
+						<span {...stylex.props(s.jobsLabel)}>Recent jobs</span>
+						{jobs.data.slice(0, 4).map((j) => (
+							<div key={j.id} {...stylex.props(s.jobLine)}>
+								<Link to="/jobs/$jobId" params={{ jobId: String(j.id) }} {...stylex.props(s.jobLink)}>
+									#{j.id} · {j.type}
+								</Link>
+								<Badge tone={jobTone[j.status] ?? "neutral"}>{j.status}</Badge>
+							</div>
+						))}
+					</div>
+				</>
 			)}
+
+			<Modal open={launching} onClose={() => setLaunching(false)} title={`Run a flow · ${account.username}`}>
+				<JobLauncher account={account} onLaunched={() => setLaunching(false)} />
+			</Modal>
 		</Card>
 	);
 }

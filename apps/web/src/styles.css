@@ -1,15 +1,49 @@
-/* StyleX appends its compiled atomic CSS here at build time. This file must be
-   imported on every route (see __root.tsx). */
+/* StyleX appends its compiled atomic CSS here at build time. Must be imported on
+   every route (see __root.tsx). */
 @layer reset, base, stylex;
 
 :root {
 	color-scheme: dark;
 }
 
+* {
+	box-sizing: border-box;
+}
+
 html,
 body {
 	margin: 0;
-	background: #0b0d10;
-	color: #e6e8eb;
-	font-family: Inter, system-ui, sans-serif;
+	padding: 0;
+	min-height: 100%;
+	background: #0a0c10;
+	background-image: radial-gradient(
+			1200px 600px at 80% -10%,
+			rgba(78, 161, 255, 0.08),
+			transparent 60%
+		),
+		radial-gradient(900px 500px at 0% 0%, rgba(78, 161, 255, 0.05), transparent 55%);
+	background-attachment: fixed;
+	color: #e8ebf0;
+	font-family: Inter, -apple-system, system-ui, sans-serif;
+	-webkit-font-smoothing: antialiased;
+}
+
+::selection {
+	background: rgba(78, 161, 255, 0.3);
+}
+
+/* Thin, dark scrollbars */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: #2f3a49 transparent;
+}
+*::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+	background: #2f3a49;
+	border-radius: 999px;
+	border: 2px solid transparent;
+	background-clip: padding-box;
 }

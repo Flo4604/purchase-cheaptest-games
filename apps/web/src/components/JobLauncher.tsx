@@ -10,19 +10,23 @@ import {
 	FLOW_FIELDS,
 	initialValues,
 } from "../lib/flows.js";
-import { colors, radius, space } from "../tokens.stylex";
-import { Button } from "./ui.js";
+import { colors, space } from "../tokens.stylex";
+import { Select } from "./Select.js";
+import { Button, Checkbox, Field, TextInput } from "./ui.js";
 
-const JOB_TYPES: JobType[] = ["buy", "sell", "cleanup", "gems", "redeem", "activate"];
+const JOB_TYPES: { label: string; value: JobType }[] = [
+	{ label: "Buy games", value: "buy" },
+	{ label: "Sell items", value: "sell" },
+	{ label: "Turn into gems", value: "gems" },
+	{ label: "Clean up listings", value: "cleanup" },
+	{ label: "Redeem apps", value: "redeem" },
+	{ label: "Activate keys", value: "activate" },
+];
 
 const s = stylex.create({
-	wrap: { display: "flex", flexDirection: "column", gap: space.sm, borderTop: `1px solid ${colors.border}`, paddingTop: space.md },
-	control: { background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, borderRadius: radius.md, padding: `${space.sm} ${space.md}`, fontSize: "14px", width: "100%", boxSizing: "border-box" },
-	label: { fontSize: "12px", color: colors.muted },
-	field: { display: "flex", flexDirection: "column", gap: space.xs },
-	flagRow: { display: "flex", alignItems: "center", gap: space.sm, fontSize: "13px", color: colors.text },
-	flags: { display: "flex", flexDirection: "column", gap: space.xs },
-	check: { display: "flex", alignItems: "center", gap: space.sm, fontSize: "14px", color: colors.text },
+	form: { display: "flex", flexDirection: "column", gap: space.md },
+	flagsLabel: { fontSize: "12px", fontWeight: 500, color: colors.muted, marginBottom: "2px" },
+	flags: { display: "flex", flexDirection: "column", gap: space.sm },
 	error: { color: colors.danger, fontSize: "13px" },
 });
 
@@ -37,62 +41,63 @@ function FieldInput({
 }) {
 	if (field.kind === "select")
 		return (
-			<label {...stylex.props(s.field)}>
-				<span {...stylex.props(s.label)}>{field.label}</span>
-				<select {...stylex.props(s.control)} value={String(value)} onChange={(e) => onChange(e.target.value)}>
-					{field.options?.map((o) => (
-						<option key={o.value} value={o.value}>{o.label}</option>
-					))}
-				</select>
-			</label>
+			<Field label={field.label}>
+				<Select
+					value={String(value)}
+					onChange={onChange}
+					options={(field.options ?? []).map((o) => ({ label: o.label, value: o.value }))}
+				/>
+			</Field>
 		);
 
 	if (field.kind === "checkbox")
-		return (
-			<label {...stylex.props(s.check)}>
-				<input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
-				{field.label}
-			</label>
-		);
+		return <Checkbox checked={Boolean(value)} onChange={onChange} label={field.label} />;
 
 	if (field.kind === "flags") {
 		const current = Number(value);
 		return (
-			<div {...stylex.props(s.field)}>
-				<span {...stylex.props(s.label)}>{field.label}</span>
+			<div>
+				<div {...stylex.props(s.flagsLabel)}>{field.label}</div>
 				<div {...stylex.props(s.flags)}>
 					{field.flags?.map((f) => (
-						<label key={f.bit} {...stylex.props(s.flagRow)}>
-							<input
-								type="checkbox"
-								checked={(current & f.bit) !== 0}
-								onChange={(e) => onChange(e.target.checked ? current | f.bit : current & ~f.bit)}
-							/>
-							{f.label}
-						</label>
+						<Checkbox
+							key={f.bit}
+							checked={(current & f.bit) !== 0}
+							onChange={(on) => onChange(on ? current | f.bit : current & ~f.bit)}
+							label={f.label}
+						/>
 					))}
 				</div>
 			</div>
 		);
 	}
 
-	// text / number / csv
 	return (
-		<label {...stylex.props(s.field)}>
-			<span {...stylex.props(s.label)}>{field.label}</span>
-			<input
-				{...stylex.props(s.control)}
+		<Field label={field.label}>
+			<TextInput
 				type={field.kind === "number" ? "number" : "text"}
 				value={String(value ?? "")}
 				onChange={(e) =>
-					onChange(field.kind === "number" ? (e.target.value === "" ? 0 : Number(e.target.value)) : e.target.value)
+					onChange(
+						field.kind === "number"
+							? e.target.value === ""
+								? 0
+								: Number(e.target.value)
+							: e.target.value,
+					)
 				}
 			/>
-		</label>
+		</Field>
 	);
 }
 
-export function JobLauncher({ account }: { account: Account }) {
+export function JobLauncher({
+	account,
+	onLaunched,
+}: {
+	account: Account;
+	onLaunched?: () => void;
+}) {
 	const navigate = useNavigate();
 	const qc = useQueryClient();
 	const [type, setType] = useState<JobType>("buy");
@@ -109,20 +114,20 @@ export function JobLauncher({ account }: { account: Account }) {
 		mutationFn: () => api.startJob(account.id, type, { config: buildConfig(type, values, account) }),
 		onSuccess: ({ jobId }) => {
 			qc.invalidateQueries({ queryKey: ["jobs", account.id] });
+			onLaunched?.();
 			navigate({ to: "/jobs/$jobId", params: { jobId: String(jobId) } });
 		},
 	});
 
 	return (
-		<div {...stylex.props(s.wrap)}>
-			<label {...stylex.props(s.field)}>
-				<span {...stylex.props(s.label)}>Flow</span>
-				<select {...stylex.props(s.control)} value={type} onChange={(e) => changeType(e.target.value as JobType)}>
-					{JOB_TYPES.map((t) => (
-						<option key={t} value={t}>{t}</option>
-					))}
-				</select>
-			</label>
+		<div {...stylex.props(s.form)}>
+			<Field label="Flow">
+				<Select
+					value={type}
+					onChange={(v) => changeType(v as JobType)}
+					options={JOB_TYPES}
+				/>
+			</Field>
 
 			{FLOW_FIELDS[type].map((field) => (
 				<FieldInput
