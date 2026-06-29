@@ -8,7 +8,7 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
-import { colors, font, radius, space } from "../tokens.stylex";
+import { colors, font, space } from "../tokens.stylex";
 import "../styles.css";
 
 export const Route = createRootRoute({
@@ -16,7 +16,7 @@ export const Route = createRootRoute({
 		meta: [
 			{ charSet: "utf-8" },
 			{ name: "viewport", content: "width=device-width, initial-scale=1" },
-			{ title: "Steam Purchase Helper" },
+			{ title: "Purchase Helper" },
 		],
 	}),
 	component: RootComponent,
@@ -24,39 +24,30 @@ export const Route = createRootRoute({
 
 const s = stylex.create({
 	header: {
-		position: "sticky",
-		top: 0,
-		zIndex: 20,
+		borderBottom: `1px solid ${colors.hair}`,
+	},
+	headerInner: {
+		maxWidth: "1000px",
+		marginInline: "auto",
+		padding: `${space.md} ${space.lg}`,
 		display: "flex",
 		alignItems: "center",
-		justifyContent: "space-between",
-		padding: `${space.md} ${space.lg}`,
-		borderBottom: `1px solid ${colors.border}`,
-		background: "rgba(10, 12, 16, 0.7)",
-		backdropFilter: "blur(10px)",
 	},
 	brand: {
-		display: "flex",
+		display: "inline-flex",
 		alignItems: "center",
 		gap: space.sm,
 		textDecoration: "none",
 		color: colors.text,
-	},
-	logo: {
-		width: "26px",
-		height: "26px",
-		borderRadius: radius.sm,
-		background: `linear-gradient(135deg, ${colors.accent}, #2d6fd6)`,
-		display: "flex",
-		alignItems: "center",
-		justifyContent: "center",
+		fontWeight: 800,
 		fontSize: "15px",
+		letterSpacing: "-0.2px",
 	},
-	brandName: { fontWeight: 700, fontSize: "15px", letterSpacing: "0.2px" },
+	mark: { width: "9px", height: "9px", background: colors.accent, borderRadius: "2px" },
 	main: {
-		maxWidth: "1080px",
-		margin: "0 auto",
-		padding: `${space.xl} ${space.lg}`,
+		maxWidth: "1000px",
+		marginInline: "auto",
+		padding: `${space.xl} ${space.lg} ${space.xxl}`,
 		fontFamily: font.sans,
 	},
 });
@@ -81,10 +72,12 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
 			<body>
 				<QueryClientProvider client={queryClient}>
 					<header {...stylex.props(s.header)}>
-						<Link to="/" {...stylex.props(s.brand)}>
-							<span {...stylex.props(s.logo)}>🎮</span>
-							<span {...stylex.props(s.brandName)}>Purchase Helper</span>
-						</Link>
+						<div {...stylex.props(s.headerInner)}>
+							<Link to="/" {...stylex.props(s.brand)}>
+								<span {...stylex.props(s.mark)} />
+								Purchase&nbsp;Helper
+							</Link>
+						</div>
 					</header>
 					<main {...stylex.props(s.main)}>{children}</main>
 				</QueryClientProvider>

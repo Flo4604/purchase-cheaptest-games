@@ -8,76 +8,72 @@ const spin = stylex.keyframes({
 });
 
 const s = stylex.create({
-	card: {
+	panel: {
 		background: colors.surface,
-		border: `1px solid ${colors.border}`,
+		border: `1px solid ${colors.hair}`,
 		borderRadius: radius.lg,
 		padding: space.lg,
-		boxShadow: shadow.card,
 		display: "flex",
 		flexDirection: "column",
 		gap: space.md,
-	},
-	cardHover: {
-		transition: "border-color 140ms, transform 140ms",
-		borderColor: { default: colors.border, ":hover": colors.borderStrong },
-		transform: { default: null, ":hover": "translateY(-2px)" },
 	},
 
 	btn: {
 		display: "inline-flex",
 		alignItems: "center",
 		justifyContent: "center",
-		gap: space.sm,
+		gap: "6px",
 		fontFamily: font.sans,
 		fontSize: "14px",
 		fontWeight: 600,
 		lineHeight: 1,
-		borderRadius: radius.md,
-		padding: `10px 16px`,
+		borderRadius: radius.sm,
+		padding: "10px 16px",
 		border: "1px solid transparent",
 		cursor: "pointer",
 		whiteSpace: "nowrap",
-		transition: "background 120ms, border-color 120ms, opacity 120ms",
-		outline: { default: "none", ":focus-visible": "none" },
+		transition: "background 120ms, border-color 120ms, color 120ms, opacity 120ms",
+		outline: "none",
 		boxShadow: { default: null, ":focus-visible": shadow.ring },
-		opacity: { default: 1, ":disabled": 0.5 },
+		opacity: { default: 1, ":disabled": 0.45 },
 	},
-	btnSm: { padding: "6px 12px", fontSize: "13px" },
+	btnSm: { padding: "6px 10px", fontSize: "13px" },
 	primary: {
-		background: { default: colors.accent, ":hover": colors.accentHover },
+		background: { default: colors.accent, ":hover": "#d4f968" },
 		color: colors.onAccent,
+		fontWeight: 700,
 	},
 	secondary: {
-		background: { default: colors.surfaceHover, ":hover": colors.border },
-		borderColor: colors.borderStrong,
+		background: { default: "transparent", ":hover": colors.surface },
+		borderColor: { default: colors.hairStrong, ":hover": colors.muted },
 		color: colors.text,
 	},
 	ghost: {
-		background: { default: "transparent", ":hover": colors.surfaceHover },
-		color: colors.muted,
+		background: "transparent",
+		color: { default: colors.muted, ":hover": colors.text },
+		padding: "8px 6px",
 	},
 	danger: {
-		background: { default: "transparent", ":hover": colors.accentSoft },
-		borderColor: colors.danger,
-		color: colors.danger,
+		background: "transparent",
+		color: { default: colors.danger, ":hover": colors.danger },
+		borderColor: { default: colors.hairStrong, ":hover": colors.danger },
 	},
 
 	field: { display: "flex", flexDirection: "column", gap: space.xs },
-	label: { fontSize: "12px", fontWeight: 500, color: colors.muted },
+	label: { fontSize: "11px", fontWeight: 600, color: colors.faint, textTransform: "uppercase", letterSpacing: "0.7px" },
 	input: {
 		width: "100%",
 		boxSizing: "border-box",
-		background: colors.bgElev,
-		border: `1px solid ${colors.border}`,
-		borderRadius: radius.md,
+		background: colors.bg,
+		border: `1px solid ${colors.hair}`,
+		borderRadius: radius.sm,
 		padding: "10px 12px",
 		color: colors.text,
-		fontSize: "14px",
-		fontFamily: font.sans,
+		fontSize: "15px",
+		fontFamily: font.mono,
 		outline: "none",
 		transition: "border-color 120ms, box-shadow 120ms",
-		borderColor: { default: colors.border, ":focus": colors.accent },
+		borderColor: { default: colors.hair, ":focus": colors.accent },
 		boxShadow: { default: null, ":focus": shadow.ring },
 	},
 
@@ -97,9 +93,9 @@ const s = stylex.create({
 		width: "18px",
 		height: "18px",
 		flexShrink: 0,
-		borderRadius: "6px",
-		border: `1px solid ${colors.borderStrong}`,
-		background: colors.bgElev,
+		borderRadius: "3px",
+		border: `1px solid ${colors.hairStrong}`,
+		background: colors.bg,
 		display: "inline-flex",
 		alignItems: "center",
 		justifyContent: "center",
@@ -112,51 +108,28 @@ const s = stylex.create({
 	badge: {
 		display: "inline-flex",
 		alignItems: "center",
-		gap: "5px",
-		fontSize: "12px",
+		gap: "6px",
+		fontSize: "11px",
 		fontWeight: 600,
 		fontFamily: font.mono,
-		padding: "2px 9px",
-		borderRadius: radius.pill,
-		border: "1px solid transparent",
-	},
-
-	stat: { display: "flex", flexDirection: "column", gap: "2px" },
-	statNum: {
-		fontSize: "20px",
-		fontWeight: 700,
-		color: colors.text,
-		fontFamily: font.mono,
-		lineHeight: 1.1,
-	},
-	statLabel: {
-		fontSize: "10px",
-		fontWeight: 600,
-		color: colors.faint,
 		textTransform: "uppercase",
-		letterSpacing: "0.6px",
+		letterSpacing: "0.5px",
+		color: colors.muted,
 	},
+	badgeDot: { width: "6px", height: "6px", borderRadius: "50%", background: "currentColor" },
 
-	track: {
-		height: "6px",
-		width: "100%",
-		background: colors.bgElev,
-		border: `1px solid ${colors.border}`,
-		borderRadius: radius.pill,
-		overflow: "hidden",
-	},
-	fill: {
-		height: "100%",
-		background: colors.accent,
-		borderRadius: radius.pill,
-		transition: "width 200ms ease",
-	},
+	stat: { display: "flex", flexDirection: "column", gap: "3px" },
+	statNum: { fontSize: "26px", fontWeight: 800, color: colors.text, fontFamily: font.mono, lineHeight: 1, letterSpacing: "-0.5px" },
+	statLabel: { fontSize: "10px", fontWeight: 600, color: colors.faint, textTransform: "uppercase", letterSpacing: "0.8px" },
+
+	track: { height: "3px", width: "100%", background: colors.hair, overflow: "hidden" },
+	fill: { height: "100%", background: colors.accent, transition: "width 200ms ease" },
 
 	spinner: {
 		width: "14px",
 		height: "14px",
 		borderRadius: "50%",
-		border: `2px solid ${colors.borderStrong}`,
+		border: `2px solid ${colors.hairStrong}`,
 		borderTopColor: colors.accent,
 		animationName: spin,
 		animationDuration: "0.7s",
@@ -165,24 +138,17 @@ const s = stylex.create({
 	},
 });
 
-const tone = stylex.create({
-	neutral: { color: colors.muted, background: colors.surfaceHover, borderColor: colors.border },
-	accent: { color: colors.accent, background: colors.accentSoft, borderColor: "transparent" },
-	success: { color: colors.success, background: "rgba(69,212,131,0.12)", borderColor: "transparent" },
-	warn: { color: colors.warn, background: "rgba(245,185,69,0.12)", borderColor: "transparent" },
-	danger: { color: colors.danger, background: "rgba(255,106,106,0.12)", borderColor: "transparent" },
+const toneColor = stylex.create({
+	neutral: { color: colors.muted },
+	accent: { color: colors.accent },
+	success: { color: colors.success },
+	warn: { color: colors.warn },
+	danger: { color: colors.danger },
 });
+export type Tone = keyof typeof toneColor;
 
-export type Tone = keyof typeof tone;
-
-export function Card({
-	children,
-	hover,
-}: {
-	children: ReactNode;
-	hover?: boolean;
-}) {
-	return <div {...stylex.props(s.card, hover && s.cardHover)}>{children}</div>;
+export function Panel({ children }: { children: ReactNode }) {
+	return <div {...stylex.props(s.panel)}>{children}</div>;
 }
 
 export function Button({
@@ -202,13 +168,7 @@ export function Button({
 	);
 }
 
-export function Field({
-	label,
-	children,
-}: {
-	label: string;
-	children: ReactNode;
-}) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
 	return (
 		<label {...stylex.props(s.field)}>
 			<span {...stylex.props(s.label)}>{label}</span>
@@ -231,21 +191,20 @@ export function Checkbox({
 	label: ReactNode;
 }) {
 	return (
-		<button
-			type="button"
-			role="checkbox"
-			aria-checked={checked}
-			onClick={() => onChange(!checked)}
-			{...stylex.props(s.check)}
-		>
+		<button type="button" role="checkbox" aria-checked={checked} onClick={() => onChange(!checked)} {...stylex.props(s.check)}>
 			<span {...stylex.props(s.box, checked && s.boxOn)}>{checked ? "✓" : ""}</span>
 			{label}
 		</button>
 	);
 }
 
-export function Badge({ children, tone: t = "neutral" }: { children: ReactNode; tone?: Tone }) {
-	return <span {...stylex.props(s.badge, tone[t])}>{children}</span>;
+export function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: Tone }) {
+	return (
+		<span {...stylex.props(s.badge, toneColor[tone])}>
+			<span {...stylex.props(s.badgeDot)} />
+			{children}
+		</span>
+	);
 }
 
 export function Stat({ value, label }: { value: ReactNode; label: string }) {
