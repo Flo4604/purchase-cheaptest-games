@@ -31,61 +31,101 @@ export class JobService {
 		private readonly keys: KeyStore,
 	) {}
 
+	// Insert a Job row, enqueue it, and wire status persistence. The runner gets
+	// the created jobId so it streams progress to the right channel.
+	private async enqueue(
+		accountId: number,
+		type: string,
+		paramsJson: string | null,
+		run: (jobId: string, signal: AbortSignal) => Promise<void>,
+	): Promise<number> {
+		const inserted = (
+			await db
+				.insert(jobTable)
+				.values({ accountId, type, status: "queued", paramsJson })
+				.returning()
+		)[0];
+		if (!inserted) throw new Error("failed to create job");
+		const jobId = String(inserted.id);
+		this.queue.submit({
+			id: jobId,
+			accountId,
+			run: (signal) => run(jobId, signal),
+			onStatus: (status, error) => {
+				void this.persist(jobId, status, error);
+			},
+		});
+		return inserted.id;
+	}
+
+	// Resolve the unlocked KEK + the account row, or throw.
+	private async prepare(accountId: number, sessionId: string) {
+		const kek = this.keys.get(sessionId);
+		if (!kek) throw new Error("locked: unlock the account with your password first");
+		const acct = (
+			await db.select().from(account).where(eq(account.id, accountId))
+		)[0];
+		if (!acct) throw new Error("account not found");
+		return { kek, acct };
+	}
+
 	async start(
 		accountId: number,
 		sessionId: string,
 		type: JobType,
 		params: JobParams,
 	): Promise<number> {
-		const kek = this.keys.get(sessionId);
-		if (!kek) throw new Error("locked: unlock the account with your password first");
+		const { kek, acct } = await this.prepare(accountId, sessionId);
+		return this.enqueue(
+			accountId,
+			type,
+			JSON.stringify(params),
+			async (jobId) => {
+				const engine = new SteamEngine(new StreamingProgressSink(this.hub, jobId));
+				try {
+					await engine.login({
+						id: acct.id,
+						username: acct.username,
+						refreshToken: getAccountRefreshToken(acct, kek),
+					});
+					const wallet = (await engine.getWalletBalance()) as Wallet;
+					await this.runFlow(engine, type, params, wallet);
+				} finally {
+					await engine.session.dispose();
+				}
+			},
+		);
+	}
 
-		const acct = (
-			await db.select().from(account).where(eq(account.id, accountId))
-		)[0];
-		if (!acct) throw new Error("account not found");
-
-		const inserted = (
-			await db
-				.insert(jobTable)
-				.values({
-					accountId,
-					type,
-					status: "queued",
-					paramsJson: JSON.stringify(params),
-				})
-				.returning()
-		)[0];
-		if (!inserted) throw new Error("failed to create job");
-		const jobId = String(inserted.id);
-
-		const run = async (_signal: AbortSignal) => {
-			const refreshToken = getAccountRefreshToken(acct, kek);
+	// Refresh cached wallet balance + owned-game count for the dashboard.
+	async startRefresh(accountId: number, sessionId: string): Promise<number> {
+		const { kek, acct } = await this.prepare(accountId, sessionId);
+		return this.enqueue(accountId, "refresh", null, async (jobId) => {
 			const sink = new StreamingProgressSink(this.hub, jobId);
 			const engine = new SteamEngine(sink);
 			try {
 				await engine.login({
 					id: acct.id,
 					username: acct.username,
-					refreshToken,
+					refreshToken: getAccountRefreshToken(acct, kek),
 				});
+				sink.info("Fetching wallet balance and owned games…");
 				const wallet = (await engine.getWalletBalance()) as Wallet;
-				await this.runFlow(engine, type, params, wallet);
+				const owned = (await engine.getOwnedAppsCount()) as number;
+				await db
+					.update(account)
+					.set({
+						cachedWalletBalance: wallet.balance,
+						cachedWalletCurrency: wallet.currency,
+						cachedOwnedCount: owned,
+						cachedAt: new Date(),
+					})
+					.where(eq(account.id, accountId));
+				sink.info(`Wallet ${wallet.balance} ${wallet.currency} · ${owned} games`);
 			} finally {
 				await engine.session.dispose();
 			}
-		};
-
-		this.queue.submit({
-			id: jobId,
-			accountId,
-			run,
-			onStatus: (status, error) => {
-				void this.persist(jobId, status, error);
-			},
 		});
-
-		return inserted.id;
 	}
 
 	private async runFlow(

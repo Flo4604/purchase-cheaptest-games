@@ -20,6 +20,7 @@ export const createRouter = (ctx: AppContext) =>
 		HttpRouter.post("/accounts", accounts.addAccount(ctx)),
 		HttpRouter.get("/accounts", accounts.listAccounts(ctx)),
 		HttpRouter.post("/accounts/:id/unlock", accounts.unlock(ctx)),
+		HttpRouter.post("/accounts/:id/refresh", accounts.refresh(ctx)),
 		HttpRouter.post("/accounts/:id/jobs", jobs.startJob(ctx)),
 		HttpRouter.get("/accounts/:id/jobs", jobs.listJobs(ctx)),
 		HttpRouter.get("/jobs/:id", jobs.getJob(ctx)),

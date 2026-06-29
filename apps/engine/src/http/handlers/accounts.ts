@@ -1,4 +1,4 @@
-import { HttpServerRequest } from "@effect/platform";
+import { HttpRouter, HttpServerRequest } from "@effect/platform";
 import { account, db } from "@psg/db";
 import { eq } from "drizzle-orm";
 import { Effect, Either, Schema } from "effect";
@@ -8,7 +8,7 @@ import {
 	unlockUser,
 } from "../../auth/index.js";
 import type { AppContext } from "../context.js";
-import { badRequest, jsonResponse, unauthorized } from "../respond.js";
+import { badRequest, jsonResponse, notFound, unauthorized } from "../respond.js";
 import { getSession } from "../session.js";
 
 const AddBody = Schema.Struct({
@@ -29,6 +29,10 @@ const sanitize = (a: AccountRow) => ({
 	priceOptionsFlag: a.priceOptionsFlag,
 	mode: a.mode,
 	hasSealedToken: !!a.encryptedRefreshToken,
+	cachedWalletBalance: a.cachedWalletBalance,
+	cachedWalletCurrency: a.cachedWalletCurrency,
+	cachedOwnedCount: a.cachedOwnedCount,
+	cachedAt: a.cachedAt,
 });
 
 export const addAccount = (ctx: AppContext) =>
@@ -92,4 +96,31 @@ export const unlock = (ctx: AppContext) =>
 		if (!kek) return yield* jsonResponse({ error: "invalid password" }, 401);
 		ctx.keys.set(session.sessionId, kek);
 		return yield* jsonResponse({ ok: true });
+	});
+
+// Kick off a refresh job (login → wallet + owned-count → cache on the row).
+export const refresh = (ctx: AppContext) =>
+	Effect.gen(function* () {
+		const session = yield* getSession(ctx);
+		if (!session) return yield* unauthorized();
+		const params = yield* HttpRouter.params;
+		const accountId = Number(params.id);
+		const acct = yield* Effect.promise(() =>
+			db
+				.select()
+				.from(account)
+				.where(eq(account.id, accountId))
+				.then((r) => r[0] ?? null),
+		);
+		if (!acct || acct.userId !== session.userId)
+			return yield* notFound("account not found");
+		const result = yield* Effect.either(
+			Effect.tryPromise(() => ctx.jobs.startRefresh(accountId, session.sessionId)),
+		);
+		if (Either.isLeft(result))
+			return yield* jsonResponse(
+				{ error: String((result.left as Error)?.message ?? result.left) },
+				423,
+			);
+		return yield* jsonResponse({ jobId: result.right }, 202);
 	});

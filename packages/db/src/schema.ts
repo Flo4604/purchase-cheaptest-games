@@ -29,6 +29,12 @@ export const account = sqliteTable("Account", {
 	dekNonce: text("dekNonce"),
 	encryptedRefreshToken: text("encryptedRefreshToken"),
 	tokenNonce: text("tokenNonce"),
+	// Cached read-only display values, refreshed by a "refresh" job (needs a
+	// Steam login). Shown on the dashboard without re-logging-in every render.
+	cachedWalletBalance: real("cachedWalletBalance"),
+	cachedWalletCurrency: text("cachedWalletCurrency"),
+	cachedOwnedCount: integer("cachedOwnedCount"),
+	cachedAt: integer("cachedAt", { mode: "timestamp_ms" }),
 	limit: text("limit").notNull().default("0"),
 	usage: text("usage").notNull().default("max"),
 	maxPrice: real("maxPrice").notNull().default(0),

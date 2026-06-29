@@ -10,6 +10,10 @@ export interface Account {
 	priceOptionsFlag: number;
 	mode: string;
 	hasSealedToken: boolean;
+	cachedWalletBalance: number | null;
+	cachedWalletCurrency: string | null;
+	cachedOwnedCount: number | null;
+	cachedAt: string | null;
 }
 
 export interface Job {
@@ -83,6 +87,10 @@ export const api = {
 		request<{ ok: true }>(`/accounts/${accountId}/unlock`, {
 			method: "POST",
 			body: JSON.stringify({ password }),
+		}),
+	refreshAccount: (accountId: number) =>
+		request<{ jobId: number }>(`/accounts/${accountId}/refresh`, {
+			method: "POST",
 		}),
 
 	startJob: (accountId: number, type: JobType, params: Record<string, unknown>) =>
