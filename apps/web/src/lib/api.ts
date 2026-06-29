@@ -5,6 +5,7 @@ export interface Account {
 	id: number;
 	steamId: string;
 	username: string;
+	avatarUrl: string | null;
 	limit: string;
 	usage: string;
 	maxPrice: number;

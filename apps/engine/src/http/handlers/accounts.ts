@@ -12,6 +12,7 @@ const sanitize = (a: AccountRow) => ({
 	id: a.id,
 	steamId: a.steamId,
 	username: a.username,
+	avatarUrl: a.avatarUrl,
 	limit: a.limit,
 	usage: a.usage,
 	maxPrice: a.maxPrice,

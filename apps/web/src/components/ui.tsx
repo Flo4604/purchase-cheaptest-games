@@ -228,3 +228,130 @@ export function ProgressBar({ value, total }: { value: number; total: number }) 
 export function Spinner() {
 	return <span {...stylex.props(s.spinner)} />;
 }
+
+const f = stylex.create({
+	segmented: { display: "inline-flex", flexWrap: "wrap", gap: "3px", border: `1px solid ${colors.hair}`, borderRadius: radius.md, padding: "3px", background: colors.bg },
+	seg: {
+		padding: "7px 13px",
+		borderRadius: radius.sm,
+		border: "none",
+		background: { default: "transparent", ":hover": colors.surface },
+		color: { default: colors.muted, ":hover": colors.text },
+		fontSize: "13px",
+		fontWeight: 600,
+		fontFamily: font.sans,
+		cursor: "pointer",
+		transition: "background 120ms, color 120ms",
+	},
+	segOn: { background: colors.surface, color: colors.accent, ":hover": { background: colors.surface } },
+	chips: { display: "flex", flexWrap: "wrap", gap: space.sm },
+	chip: {
+		padding: "7px 12px",
+		borderRadius: radius.pill,
+		border: `1px solid ${colors.hairStrong}`,
+		background: { default: "transparent", ":hover": colors.surface },
+		color: colors.muted,
+		fontSize: "13px",
+		fontFamily: font.sans,
+		cursor: "pointer",
+		transition: "border-color 120ms, color 120ms, background 120ms",
+	},
+	chipOn: { borderColor: colors.accent, color: colors.accent, background: "rgba(199,242,75,0.08)" },
+	textarea: {
+		width: "100%",
+		boxSizing: "border-box",
+		minHeight: "96px",
+		resize: "vertical",
+		background: colors.bg,
+		border: `1px solid ${colors.hair}`,
+		borderRadius: radius.sm,
+		padding: "10px 12px",
+		color: colors.text,
+		fontSize: "14px",
+		fontFamily: font.mono,
+		outline: "none",
+		borderColor: { default: colors.hair, ":focus": colors.accent },
+		boxShadow: { default: null, ":focus": shadow.ring },
+	},
+	switchRow: { display: "inline-flex", alignItems: "center", gap: space.sm, cursor: "pointer", background: "none", border: "none", padding: 0, color: colors.text, fontSize: "14px" },
+	track: { width: "34px", height: "20px", borderRadius: radius.pill, background: colors.hairStrong, padding: "2px", transition: "background 120ms", display: "flex", alignItems: "center", flexShrink: 0 },
+	trackOn: { background: colors.accent },
+	knob: { width: "16px", height: "16px", borderRadius: "50%", background: colors.text, transition: "transform 120ms" },
+	knobOn: { transform: "translateX(14px)", background: colors.onAccent },
+});
+
+export function Segmented<T extends string>({
+	value,
+	onChange,
+	options,
+}: {
+	value: T;
+	onChange: (v: T) => void;
+	options: { label: string; value: T }[];
+}) {
+	return (
+		<div {...stylex.props(f.segmented)}>
+			{options.map((o) => (
+				<button
+					key={o.value}
+					type="button"
+					onClick={() => onChange(o.value)}
+					{...stylex.props(f.seg, o.value === value && f.segOn)}
+				>
+					{o.label}
+				</button>
+			))}
+		</div>
+	);
+}
+
+export function ChipGroup({
+	value,
+	onChange,
+	options,
+}: {
+	value: number;
+	onChange: (v: number) => void;
+	options: { label: string; bit: number }[];
+}) {
+	return (
+		<div {...stylex.props(f.chips)}>
+			{options.map((o) => {
+				const on = (value & o.bit) !== 0;
+				return (
+					<button
+						key={o.bit}
+						type="button"
+						onClick={() => onChange(on ? value & ~o.bit : value | o.bit)}
+						{...stylex.props(f.chip, on && f.chipOn)}
+					>
+						{o.label}
+					</button>
+				);
+			})}
+		</div>
+	);
+}
+
+export function Switch({
+	checked,
+	onChange,
+	label,
+}: {
+	checked: boolean;
+	onChange: (v: boolean) => void;
+	label: ReactNode;
+}) {
+	return (
+		<button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)} {...stylex.props(f.switchRow)}>
+			<span {...stylex.props(f.track, checked && f.trackOn)}>
+				<span {...stylex.props(f.knob, checked && f.knobOn)} />
+			</span>
+			{label}
+		</button>
+	);
+}
+
+export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+	return <textarea {...props} {...stylex.props(f.textarea)} />;
+}

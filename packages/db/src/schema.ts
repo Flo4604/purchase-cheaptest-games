@@ -29,6 +29,7 @@ export const account = pgTable("Account", {
 		.references(() => user.id),
 	steamId: text("steamId").notNull(),
 	username: text("username").notNull(),
+	avatarUrl: text("avatarUrl"),
 	wrappedDek: text("wrappedDek"),
 	dekNonce: text("dekNonce"),
 	encryptedRefreshToken: text("encryptedRefreshToken"),

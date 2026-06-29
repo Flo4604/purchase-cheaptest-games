@@ -1,117 +1,143 @@
 import type { Account, JobType } from "./api.js";
 
-// Form specs per flow type — mirror the configs the engine flows consume
-// (originally built by the CLI's inquirer prompts).
-
-export interface FlowField {
-	name: string;
-	label: string;
-	kind: "text" | "number" | "select" | "checkbox" | "flags" | "csv";
-	options?: { label: string; value: string }[];
-	flags?: { label: string; bit: number }[];
-	default?: string | number | boolean;
-}
-
-// Bitflags from the engine's constants (EXTRA_OPTIONS).
-const BUYING_FLAGS = [
-	{ label: "Trading cards (counts toward badge)", bit: 1 },
-	{ label: "Trading cards (all games)", bit: 2 },
+export const FLOW_TABS: { label: string; value: JobType }[] = [
+	{ label: "Buy", value: "buy" },
+	{ label: "Sell", value: "sell" },
+	{ label: "Gems", value: "gems" },
+	{ label: "Clean up", value: "cleanup" },
+	{ label: "Redeem", value: "redeem" },
+	{ label: "Activate", value: "activate" },
 ];
-const SELLING_FLAGS = [
+
+export const STRATEGIES = [
+	{ label: "Until wallet empty", value: "max" },
+	{ label: "Buy N games", value: "amount" },
+	{ label: "Spend a balance", value: "balance" },
+	{ label: "Until next badge", value: "next" },
+	{ label: "Preview badge cost", value: "preview" },
+];
+
+export const REDUCTION = [
+	{ label: "Fixed amount", value: "fixed" },
+	{ label: "Percentage", value: "percentage" },
+];
+
+export const BUYING_FLAGS = [
+	{ label: "Trading cards (badge)", bit: 1 },
+	{ label: "Trading cards (all)", bit: 2 },
+];
+export const SELLING_FLAGS = [
 	{ label: "All trading cards", bit: 4 },
-	{ label: "Normal trading cards", bit: 8 },
-	{ label: "Foil trading cards", bit: 16 },
+	{ label: "Normal cards", bit: 8 },
+	{ label: "Foil cards", bit: 16 },
 	{ label: "Backgrounds", bit: 32 },
 	{ label: "Emoticons", bit: 64 },
 	{ label: "Profile backgrounds", bit: 128 },
-	{ label: "Mini profile backgrounds", bit: 256 },
+	{ label: "Mini profile bgs", bit: 256 },
 	{ label: "Stickers", bit: 512 },
 	{ label: "Chat effects", bit: 1024 },
 	{ label: "Animated avatars", bit: 2048 },
 	{ label: "Avatar frames", bit: 4096 },
 ];
-const REDUCTION = [
-	{ label: "Remove fixed amount", value: "fixed" },
-	{ label: "Remove percentage", value: "percentage" },
-];
 
-export const FLOW_FIELDS: Record<JobType, FlowField[]> = {
-	buy: [
-		{
-			name: "usage",
-			label: "Strategy",
-			kind: "select",
-			default: "max",
-			options: [
-				{ label: "Until wallet empty", value: "max" },
-				{ label: "Buy N games", value: "amount" },
-				{ label: "Spend N balance", value: "balance" },
-				{ label: "Until next badge", value: "next" },
-				{ label: "Preview badge cost", value: "preview" },
-			],
-		},
-		{ name: "limit", label: "Limit (games / balance)", kind: "number", default: 0 },
-		{ name: "maxPrice", label: "Max price per game", kind: "number", default: 0 },
-		{ name: "priceOptionsFlag", label: "Only games with", kind: "flags", flags: BUYING_FLAGS },
-	],
-	sell: [
-		{ name: "sellOptionsFlag", label: "Item types", kind: "flags", flags: SELLING_FLAGS, default: 4 },
-		{ name: "priceCalculation", label: "Price reduction", kind: "select", default: "fixed", options: REDUCTION },
-		{ name: "priceToRemove", label: "Amount / percent to remove", kind: "number", default: 0.03 },
-		{ name: "minPrice", label: "Min sell price (cents)", kind: "number", default: 0 },
-		{ name: "instantSell", label: "Instant sell (to highest buy order)", kind: "checkbox", default: false },
-		{ name: "instantSellThreshold", label: "Instant-sell max discount %", kind: "number", default: 50 },
-	],
-	gems: [
-		{ name: "sellOptionsFlag", label: "Item types", kind: "flags", flags: SELLING_FLAGS, default: 4 },
-		{ name: "priceCalculation", label: "Price reduction", kind: "select", default: "fixed", options: REDUCTION },
-		{ name: "priceToRemove", label: "Amount / percent to remove", kind: "number", default: 0.03 },
-	],
-	cleanup: [
-		{ name: "removeAll", label: "Remove ALL listings (not just overpriced)", kind: "checkbox", default: false },
-	],
-	redeem: [{ name: "list", label: "AppIDs (comma-separated)", kind: "csv" }],
-	activate: [{ name: "keys", label: "CD keys (one per line or comma-separated)", kind: "csv" }],
-};
+export interface FlowCfg {
+	usage: string;
+	limit: number;
+	maxPrice: number;
+	priceOptionsFlag: number;
+	sellOptionsFlag: number;
+	priceCalculation: string;
+	priceToRemove: number;
+	minPrice: number;
+	instantSell: boolean;
+	instantSellThreshold: number;
+	removeAll: boolean;
+	list: string;
+	keys: string;
+}
 
-export type FieldValue = string | number | boolean;
+export const defaultCfg = (type: JobType, account: Account): FlowCfg => ({
+	usage: type === "buy" ? account.usage : "max",
+	limit: type === "buy" ? Number(account.limit) || 0 : 0,
+	maxPrice: type === "buy" ? account.maxPrice : 0,
+	priceOptionsFlag: type === "buy" ? account.priceOptionsFlag : 0,
+	sellOptionsFlag: 4,
+	priceCalculation: "fixed",
+	priceToRemove: 0.03,
+	minPrice: 0,
+	instantSell: false,
+	instantSellThreshold: 50,
+	removeAll: false,
+	list: "",
+	keys: "",
+});
 
-/** Initial form values for a flow; `buy` is pre-filled from the account's saved config. */
-export const initialValues = (
-	type: JobType,
-	account: Account,
-): Record<string, FieldValue> => {
-	const values: Record<string, FieldValue> = {};
-	for (const f of FLOW_FIELDS[type]) {
-		values[f.name] = f.default ?? (f.kind === "flags" || f.kind === "number" ? 0 : f.kind === "checkbox" ? false : "");
-	}
-	if (type === "buy") {
-		values.usage = account.usage;
-		values.limit = Number(account.limit) || 0;
-		values.maxPrice = account.maxPrice;
-		values.priceOptionsFlag = account.priceOptionsFlag;
-	}
-	return values;
-};
+const csv = (s: string) =>
+	s
+		.split(/[\n,]/)
+		.map((t) => t.trim())
+		.filter(Boolean);
 
-/** Build the engine `config` object from raw field values. */
 export const buildConfig = (
 	type: JobType,
-	values: Record<string, FieldValue>,
+	cfg: FlowCfg,
 	account: Account,
 ): Record<string, unknown> => {
-	const config: Record<string, unknown> = {};
-	for (const f of FLOW_FIELDS[type]) {
-		const v = values[f.name];
-		if (f.kind === "number" || f.kind === "flags") config[f.name] = Number(v);
-		else if (f.kind === "checkbox") config[f.name] = Boolean(v);
-		else if (f.kind === "csv")
-			config[f.name] = String(v ?? "")
-				.split(/[\n,]/)
-				.map((s) => s.trim())
-				.filter(Boolean);
-		else config[f.name] = v;
+	switch (type) {
+		case "buy":
+			return { usage: cfg.usage, limit: cfg.limit, maxPrice: cfg.maxPrice, priceOptionsFlag: cfg.priceOptionsFlag };
+		case "sell":
+			return {
+				sellOptionsFlag: cfg.sellOptionsFlag,
+				priceCalculation: cfg.priceCalculation,
+				priceToRemove: cfg.priceToRemove,
+				minPrice: cfg.minPrice,
+				instantSell: cfg.instantSell,
+				instantSellThreshold: cfg.instantSellThreshold,
+			};
+		case "gems":
+			return { sellOptionsFlag: cfg.sellOptionsFlag, priceCalculation: cfg.priceCalculation, priceToRemove: cfg.priceToRemove };
+		case "cleanup":
+			return { removeAll: cfg.removeAll };
+		case "redeem":
+			return { list: csv(cfg.list) };
+		case "activate":
+			return { keys: csv(cfg.keys), accountId: account.id };
 	}
-	if (type === "activate") config.accountId = account.id;
-	return config;
+};
+
+const cur = (account: Account) => account.cachedWalletCurrency ?? "";
+
+// Plain-English description of what will run — builds confidence before launch.
+export const summarize = (type: JobType, cfg: FlowCfg, account: Account): string => {
+	switch (type) {
+		case "buy": {
+			const strat =
+				cfg.usage === "amount"
+					? `Buy ${cfg.limit || 0} games`
+					: cfg.usage === "balance"
+						? `Spend ${cfg.limit || 0} ${cur(account)} on games`
+						: cfg.usage === "next"
+							? "Buy games until the next badge"
+							: cfg.usage === "preview"
+								? "Preview the cost to reach a badge"
+								: "Buy games until the wallet is empty";
+			const price = cfg.maxPrice ? `, max ${cfg.maxPrice} ${cur(account)} each` : "";
+			const cards = cfg.priceOptionsFlag ? ", only games with trading cards" : "";
+			return `${strat}${price}${cards}.`;
+		}
+		case "sell": {
+			const n = SELLING_FLAGS.filter((x) => cfg.sellOptionsFlag & x.bit).length;
+			const how = cfg.instantSell ? "Instantly sell" : "List";
+			return `${how} ${n || 0} item type${n === 1 ? "" : "s"}, ${cfg.priceCalculation === "fixed" ? `${cfg.priceToRemove} ${cur(account)} below` : `${cfg.priceToRemove}% under`} market.`;
+		}
+		case "gems":
+			return `Turn ${SELLING_FLAGS.filter((x) => cfg.sellOptionsFlag & x.bit).length || 0} item types into gems.`;
+		case "cleanup":
+			return cfg.removeAll ? "Remove ALL your market listings." : "Remove only overpriced listings.";
+		case "redeem":
+			return `Redeem ${csv(cfg.list).length} app(s).`;
+		case "activate":
+			return `Activate ${csv(cfg.keys).length} CD key(s).`;
+	}
 };

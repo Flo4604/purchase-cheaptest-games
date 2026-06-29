@@ -1,3 +1,4 @@
+import SteamID from "steamid";
 import { SteamSession } from "./session.js";
 import type { ProgressSink } from "./progress.js";
 import { getOwnedApps, getOwnedAppsCount } from "./ops/apps.js";
@@ -49,6 +50,26 @@ export class SteamEngine {
 	}
 	getOwnedAppsCount() {
 		return getOwnedAppsCount(this.session);
+	}
+	/** Public Steam avatar URL for a SteamID (best-effort; null on failure). */
+	getAvatarUrl(steamId: string): Promise<string | null> {
+		return new Promise((resolve) => {
+			try {
+				this.session.community.getSteamUser(
+					new SteamID(steamId),
+					(err: unknown, profile: { getAvatarURL?: (size: string) => string }) => {
+						if (err || !profile?.getAvatarURL) return resolve(null);
+						try {
+							resolve(profile.getAvatarURL("full"));
+						} catch {
+							resolve(null);
+						}
+					},
+				);
+			} catch {
+				resolve(null);
+			}
+		});
 	}
 
 	// flows

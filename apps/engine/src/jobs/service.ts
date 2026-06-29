@@ -103,9 +103,10 @@ export class JobService {
 					username: acct.username,
 					refreshToken: getAccountRefreshToken(acct),
 				});
-				sink.info("Fetching wallet balance and owned games…");
+				sink.info("Fetching wallet, owned games and profile…");
 				const wallet = (await engine.getWalletBalance()) as Wallet;
 				const owned = (await engine.getOwnedAppsCount()) as number;
+				const avatarUrl = await engine.getAvatarUrl(acct.steamId);
 				await db
 					.update(account)
 					.set({
@@ -113,6 +114,7 @@ export class JobService {
 						cachedWalletCurrency: wallet.currency,
 						cachedOwnedCount: owned,
 						cachedAt: new Date(),
+						...(avatarUrl ? { avatarUrl } : {}),
 					})
 					.where(eq(account.id, accountId));
 				sink.info(`Wallet ${wallet.balance} ${wallet.currency} · ${owned} games`);

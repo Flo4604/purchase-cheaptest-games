@@ -1,10 +1,10 @@
 import * as stylex from "@stylexjs/stylex";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type Account, api } from "../lib/api.js";
 import { useJobStream } from "../lib/useJobStream.js";
-import { colors, font, space } from "../tokens.stylex";
+import { colors, font, radius, space } from "../tokens.stylex";
 import { JobLauncher } from "./JobLauncher.js";
 import { Modal } from "./Modal.js";
 import { Badge, Button, Spinner, Stat, type Tone } from "./ui.js";
@@ -17,7 +17,22 @@ const s = stylex.create({
 		padding: `${space.lg} 0`,
 		borderTop: `1px solid ${colors.hair}`,
 	},
-	top: { display: "flex", alignItems: "baseline", gap: space.md },
+	top: { display: "flex", alignItems: "center", gap: space.md },
+	avatar: {
+		width: "38px",
+		height: "38px",
+		flexShrink: 0,
+		borderRadius: radius.md,
+		overflow: "hidden",
+		background: `linear-gradient(135deg, ${colors.accent}, #6f8f2a)`,
+		color: colors.onAccent,
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "center",
+		fontWeight: 800,
+		fontSize: "16px",
+	},
+	avatarImg: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
 	name: { fontSize: "24px", fontWeight: 800, color: colors.text, letterSpacing: "-0.6px" },
 	steamId: { marginLeft: "auto", fontSize: "12px", color: colors.faint, fontFamily: font.mono },
 	mid: { display: "flex", alignItems: "center", gap: space.xl },
@@ -64,9 +79,26 @@ export function AccountCard({ account }: { account: Account }) {
 	}, [refreshStream.terminal, qc]);
 	const refreshing = refreshJobId !== null;
 
+	// Populate wallet/games/avatar automatically the first time we see an account
+	// that's never been refreshed. Runs once per mount (no retry loop on failure).
+	const autoRan = useRef(false);
+	useEffect(() => {
+		if (!autoRan.current && account.cachedAt == null && refreshJobId == null) {
+			autoRan.current = true;
+			refresh.mutate();
+		}
+	}, [account.cachedAt, refreshJobId, refresh]);
+
 	return (
 		<div {...stylex.props(s.row)}>
 			<div {...stylex.props(s.top)}>
+				<span {...stylex.props(s.avatar)}>
+					{account.avatarUrl ? (
+						<img {...stylex.props(s.avatarImg)} src={account.avatarUrl} alt="" />
+					) : (
+						account.username.charAt(0).toUpperCase()
+					)}
+				</span>
 				<span {...stylex.props(s.name)}>{account.username}</span>
 				<span {...stylex.props(s.steamId)}>{account.steamId}</span>
 			</div>

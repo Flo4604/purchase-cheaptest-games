@@ -8,6 +8,13 @@
       "when": 1782747896526,
       "tag": "0000_condemned_brother_voodoo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782752126660,
+      "tag": "0001_wandering_absorbing_man",
+      "breakpoints": true
     }
   ]
 }
