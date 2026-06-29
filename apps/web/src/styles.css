@@ -9,6 +9,27 @@
 	box-sizing: border-box;
 }
 
+/* Kill native form-control chrome so StyleX fully controls appearance. In @layer
+   base so StyleX (in @layer stylex, declared later) still wins per-property. */
+@layer base {
+	button,
+	input,
+	select,
+	textarea {
+		appearance: none;
+		-webkit-appearance: none;
+		font: inherit;
+	}
+	button {
+		margin: 0;
+		padding: 0;
+		background: none;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+	}
+}
+
 html,
 body {
 	margin: 0;
