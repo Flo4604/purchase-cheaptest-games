@@ -5,7 +5,24 @@ import { defineConfig } from "vite";
 import tsConfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-	server: { port: 3100 },
+	server: {
+		port: 3100,
+		// Same-origin in dev so the engine's httpOnly session cookie just works
+		// (no CORS / SameSite headaches). /api -> engine HTTP, /ws -> engine WS.
+		proxy: {
+			"/api": {
+				target: process.env.ENGINE_URL ?? "http://localhost:3101",
+				changeOrigin: true,
+				rewrite: (p) => p.replace(/^\/api/, ""),
+			},
+			"/ws": {
+				target: process.env.ENGINE_WS_URL ?? "ws://localhost:3102",
+				ws: true,
+				changeOrigin: true,
+				rewrite: (p) => p.replace(/^\/ws/, ""),
+			},
+		},
+	},
 	plugins: [
 		tsConfigPaths(),
 		// StyleX must run before the React plugin (Fast Refresh). It appends
