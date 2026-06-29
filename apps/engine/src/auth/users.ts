@@ -47,3 +47,19 @@ export const authenticate = async (
 	const kek = await deriveKek(password, u.saltKek);
 	return { user: u, kek };
 };
+
+/** Re-derive the KEK for an already-identified user (the /unlock route, after a
+ * KEK has expired from the in-memory store). Returns null if the password fails. */
+export const unlockUser = async (
+	userId: number,
+	password: string,
+): Promise<Buffer | null> => {
+	const u = (await db.select().from(user).where(eq(user.id, userId)))[0];
+	if (!u) return null;
+	const ok = await verifyPassword(password, {
+		saltAuth: u.saltAuth,
+		authHash: u.authHash,
+	});
+	if (!ok) return null;
+	return deriveKek(password, u.saltKek);
+};

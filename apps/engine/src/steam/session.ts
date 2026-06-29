@@ -1,4 +1,4 @@
-import { SteamAuthExpired } from "@psg/core";
+import { SteamAuthExpired, SteamRequestFailed } from "@psg/core";
 import { Effect, ManagedRuntime } from "effect";
 import { EAuthTokenPlatformType, LoginSession } from "steam-session";
 import SteamCommunity from "steamcommunity";
@@ -18,6 +18,25 @@ import {
 import type { ProgressSink } from "./progress.js";
 import { ConsoleProgressSink } from "./progress.js";
 import type { LoginAccount, LoginResult } from "./types.js";
+
+// A Steam refresh token is a JWT. steam-user throws "Invalid JWT" from an
+// internal async tick on a malformed token (an unhandled rejection that would
+// crash the process), so we pre-check shape + expiry and fail cleanly instead.
+const isWellFormedJwt = (token: string): boolean => {
+	const parts = token?.split(".");
+	if (!parts || parts.length !== 3) return false;
+	try {
+		const payload = JSON.parse(
+			Buffer.from(parts[1] as string, "base64url").toString("utf8"),
+		);
+		if (typeof payload.exp === "number" && payload.exp * 1000 <= Date.now()) {
+			return false; // expired
+		}
+		return true;
+	} catch {
+		return false;
+	}
+};
 
 /**
  * A single logged-in Steam account session. Owns the long-lived steam-user CM
@@ -187,63 +206,89 @@ export class SteamSession {
 	 */
 	login(account: LoginAccount): Promise<LoginResult> {
 		return new Promise<LoginResult>((resolve, reject) => {
-			const onError = (err: { eresult?: number }) => {
-				this.client.removeListener("webSession", onWebSession);
+			if (!isWellFormedJwt(account.refreshToken)) {
+				reject(new SteamAuthExpired({ accountId: account.id }));
+				return;
+			}
 
-				if (err.eresult === SteamUser.EResult.Expired) {
-					reject(new SteamAuthExpired({ accountId: account.id }));
-					return;
-				}
-
-				reject(err as Error);
-			};
-
-			const onWebSession = async (_sessionID: string, cookies: string[]) => {
+			let settled = false;
+			// Single exit point: detach listeners, clear the timeout, run once.
+			const finish = (action: () => void) => {
+				if (settled) return;
+				settled = true;
 				this.client.removeListener("error", onError);
-				this.setCookies(cookies);
-
-				const session = new LoginSession(EAuthTokenPlatformType.WebBrowser);
-				session.refreshToken = account.refreshToken;
-				const webCookies: string[] = await session.getWebCookies();
-				this.community.setCookies(webCookies);
-
-				cookies.push(
-					...webCookies
-						.filter((cookie) =>
-							cookie.includes("Domain=checkout.steampowered.com"),
-						)
-						.map((cookie) => cookie.split(";")[0] as string),
-				);
-
-				// preserve the old behaviour (rebuilds the array reference)
-				cookies = cookies.splice(0);
-
-				this.cookies = cookies;
-
-				const newSessionId = (
-					cookies.find((cookie) => cookie.includes("sessionid")) as string
-				)
-					.split(";")[0]!
-					.split("=")[1] as string;
-
-				const accessToken = (
-					cookies.find((cookie) =>
-						cookie.includes("steamLoginSecure"),
-					) as string
-				)
-					.split(";")[0]!
-					.split("=")[1]!
-					.split("%7C%7C")[1] as string;
-
-				this.sessionId = newSessionId;
-				this.accessToken = accessToken;
-
-				resolve({ sessionId: newSessionId, accessToken });
+				this.client.removeListener("webSession", onWebSession);
+				clearTimeout(timer);
+				action();
 			};
+
+			const onError = (err: { eresult?: number }) => {
+				finish(() =>
+					err.eresult === SteamUser.EResult.Expired
+						? reject(new SteamAuthExpired({ accountId: account.id }))
+						: reject(err as Error),
+				);
+			};
+
+			const onWebSession = (_sessionID: string, cookies: string[]) => {
+				if (settled) return;
+				// Guard the async work so any throw rejects the promise instead of
+				// becoming an unhandled rejection that crashes the process.
+				void (async () => {
+					try {
+						this.setCookies(cookies);
+
+						const session = new LoginSession(
+							EAuthTokenPlatformType.WebBrowser,
+						);
+						session.refreshToken = account.refreshToken;
+						const webCookies: string[] = await session.getWebCookies();
+						this.community.setCookies(webCookies);
+
+						cookies.push(
+							...webCookies
+								.filter((cookie) =>
+									cookie.includes("Domain=checkout.steampowered.com"),
+								)
+								.map((cookie) => cookie.split(";")[0] as string),
+						);
+						cookies = cookies.splice(0);
+						this.cookies = cookies;
+
+						const newSessionId = (
+							cookies.find((cookie) => cookie.includes("sessionid")) as string
+						)
+							.split(";")[0]!
+							.split("=")[1] as string;
+						const accessToken = (
+							cookies.find((cookie) =>
+								cookie.includes("steamLoginSecure"),
+							) as string
+						)
+							.split(";")[0]!
+							.split("=")[1]!
+							.split("%7C%7C")[1] as string;
+
+						this.sessionId = newSessionId;
+						this.accessToken = accessToken;
+						finish(() => resolve({ sessionId: newSessionId, accessToken }));
+					} catch (e) {
+						finish(() => reject(e as Error));
+					}
+				})();
+			};
+
+			// Bound the login so a stuck connection can't hold the per-account lock.
+			const timer = setTimeout(() => {
+				finish(() =>
+					reject(
+						new SteamRequestFailed({ endpoint: "logon", cause: "login timeout" }),
+					),
+				);
+			}, 30_000);
 
 			this.client.once("error", onError);
 			this.client.once("webSession", onWebSession);
-
 			this.client.logOn({ refreshToken: account.refreshToken });
 		});
 	}

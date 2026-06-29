@@ -59,6 +59,23 @@ export const bundleApp = sqliteTable("BundleApp", {
 	appId: integer("appId").notNull(),
 });
 
+// Backs the job queue, history, and resumable progress (WEBAPP_PLAN §4/§6).
+export const job = sqliteTable("Job", {
+	id: integer("id").primaryKey({ autoIncrement: true }),
+	accountId: integer("accountId")
+		.notNull()
+		.references(() => account.id),
+	type: text("type").notNull(), // buy|sell|cleanup|gems|redeem|activate
+	status: text("status").notNull().default("queued"), // queued|running|done|failed|canceled
+	paramsJson: text("paramsJson"),
+	progressJson: text("progressJson"),
+	error: text("error"),
+	createdAt: integer("createdAt", { mode: "timestamp_ms" })
+		.notNull()
+		.$defaultFn(() => new Date()),
+	finishedAt: integer("finishedAt", { mode: "timestamp_ms" }),
+});
+
 export const activatedKey = sqliteTable("ActivatedKey", {
 	id: integer("id").primaryKey({ autoIncrement: true }),
 	productKey: text("productKey").notNull().unique(),
