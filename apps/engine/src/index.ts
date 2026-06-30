@@ -37,6 +37,19 @@ wsServer.listen(WS_PORT, () =>
 	console.log(`[engine] websocket listening on :${WS_PORT}`),
 );
 
+// Exit cleanly on shutdown (tsx watch restarts, deploys). Without closing the WS
+// server the event loop stays alive and tsx has to SIGKILL (exit 137), which
+// makes `pnpm dev` fall over.
+let shuttingDown = false;
+const shutdown = () => {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	wsServer.close();
+	setTimeout(() => process.exit(0), 200).unref();
+};
+process.once("SIGTERM", shutdown);
+process.once("SIGINT", shutdown);
+
 const HttpLive = HttpServer.serve(router.pipe(HttpMiddleware.logger)).pipe(
 	HttpServer.withLogAddress,
 	Layer.provide(NodeHttpServer.layer(createServer, { port: PORT })),

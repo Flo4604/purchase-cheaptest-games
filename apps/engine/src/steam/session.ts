@@ -76,9 +76,26 @@ export class SteamSession {
 		});
 	}
 
-	/** Release the rate-limiter runtime. Call when the session is done. */
-	dispose(): Promise<void> {
-		return this.runtime.dispose();
+	/** Tear the session down fully when a job ends. Without this, every job
+	 * leaks a live steam-user CM connection + listeners + the trade-manager's
+	 * polling timer, which grows memory/sockets until the process is killed. */
+	async dispose(): Promise<void> {
+		try {
+			this.client.logOff();
+		} catch {
+			/* not connected */
+		}
+		try {
+			this.client.removeAllListeners();
+		} catch {
+			/* noop */
+		}
+		try {
+			this.manager.shutdown();
+		} catch {
+			/* noop */
+		}
+		await this.runtime.dispose();
 	}
 
 	// [ HTTP REQUESTS ]
