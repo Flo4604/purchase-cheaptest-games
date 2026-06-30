@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { colors, font, radius, shadow, space } from "../tokens.stylex";
 
 export interface SelectOption {
@@ -8,7 +9,6 @@ export interface SelectOption {
 }
 
 const s = stylex.create({
-	wrap: { position: "relative" },
 	trigger: {
 		width: "100%",
 		boxSizing: "border-box",
@@ -31,13 +31,12 @@ const s = stylex.create({
 	},
 	chev: { color: colors.faint, fontSize: "10px", transition: "transform 140ms" },
 	chevOpen: { transform: "rotate(180deg)" },
+	// Rendered in a portal with fixed positioning so it's always opaque + on top,
+	// regardless of the modal's stacking/overflow context.
 	popup: {
-		position: "absolute",
-		top: "calc(100% + 6px)",
-		left: 0,
-		right: 0,
-		zIndex: 30,
-		background: colors.surface,
+		position: "fixed",
+		zIndex: 100,
+		backgroundColor: colors.surface,
 		border: `1px solid ${colors.hairStrong}`,
 		borderRadius: radius.md,
 		boxShadow: shadow.pop,
@@ -45,7 +44,7 @@ const s = stylex.create({
 		display: "flex",
 		flexDirection: "column",
 		gap: "1px",
-		maxHeight: "280px",
+		maxHeight: "300px",
 		overflowY: "auto",
 	},
 	item: {
@@ -78,43 +77,74 @@ export function Select({
 	options: SelectOption[];
 }) {
 	const [open, setOpen] = useState(false);
-	const ref = useRef<HTMLDivElement>(null);
+	const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const popupRef = useRef<HTMLDivElement>(null);
+
+	const place = () => {
+		const el = triggerRef.current;
+		if (!el) return;
+		const r = el.getBoundingClientRect();
+		setPos({ top: r.bottom + 6, left: r.left, width: r.width });
+	};
 
 	useEffect(() => {
 		if (!open) return;
+		place();
 		const onDoc = (e: MouseEvent) => {
-			if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+			const t = e.target as Node;
+			if (triggerRef.current?.contains(t) || popupRef.current?.contains(t)) return;
+			setOpen(false);
 		};
+		const close = () => setOpen(false);
 		document.addEventListener("mousedown", onDoc);
-		return () => document.removeEventListener("mousedown", onDoc);
+		window.addEventListener("scroll", close, true);
+		window.addEventListener("resize", close);
+		return () => {
+			document.removeEventListener("mousedown", onDoc);
+			window.removeEventListener("scroll", close, true);
+			window.removeEventListener("resize", close);
+		};
 	}, [open]);
 
 	const selected = options.find((o) => o.value === value);
 
 	return (
-		<div ref={ref} {...stylex.props(s.wrap)}>
-			<button type="button" onClick={() => setOpen((o) => !o)} {...stylex.props(s.trigger)}>
+		<>
+			<button
+				ref={triggerRef}
+				type="button"
+				onClick={() => setOpen((o) => !o)}
+				{...stylex.props(s.trigger)}
+			>
 				<span>{selected?.label ?? "Select…"}</span>
 				<span {...stylex.props(s.chev, open && s.chevOpen)}>▾</span>
 			</button>
-			{open && (
-				<div {...stylex.props(s.popup)}>
-					{options.map((o) => (
-						<button
-							key={o.value}
-							type="button"
-							onClick={() => {
-								onChange(o.value);
-								setOpen(false);
-							}}
-							{...stylex.props(s.item, o.value === value && s.itemActive)}
-						>
-							<span>{o.label}</span>
-							{o.value === value && <span {...stylex.props(s.tick)}>✓</span>}
-						</button>
-					))}
-				</div>
-			)}
-		</div>
+			{open &&
+				typeof document !== "undefined" &&
+				createPortal(
+					<div
+						ref={popupRef}
+						{...stylex.props(s.popup)}
+						style={{ top: pos.top, left: pos.left, width: pos.width }}
+					>
+						{options.map((o) => (
+							<button
+								key={o.value}
+								type="button"
+								onClick={() => {
+									onChange(o.value);
+									setOpen(false);
+								}}
+								{...stylex.props(s.item, o.value === value && s.itemActive)}
+							>
+								<span>{o.label}</span>
+								{o.value === value && <span {...stylex.props(s.tick)}>✓</span>}
+							</button>
+						))}
+					</div>,
+					document.body,
+				)}
+		</>
 	);
 }
