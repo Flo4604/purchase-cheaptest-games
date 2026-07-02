@@ -235,3 +235,79 @@ implementation and a second client; remove it once the web app reaches parity.
 - **Multi-instance key handling** — confirm sticky-session approach before scaling
   past one engine process.
 ```
+
+---
+
+## 12. Implementation status (updated 2026-07-02)
+
+Built on branch `feat/webapp-migration` (17 commits atop the Drizzle port on
+`master`). **Runs with one command: `pnpm dev`** — Turbo starts engine + web;
+the engine embeds Postgres (pglite) and auto-migrates on boot, so there's no DB
+setup. Ports: web `3100`, engine HTTP `3101`, engine WS `3102`.
+
+### Done
+
+- **Phase 0 — Monorepo.** pnpm + Turborepo, scope `@psg/*`: `apps/engine`,
+  `apps/web`, `packages/{db,core,crypto}`. Strict TS, shared tsconfig base.
+- **Phases 1–2 — Engine.** `steam.js` (2212 lines) ported to a typed, split
+  `SteamEngine` (`apps/engine/src/steam/`: `lib/ ops/ flows/` + facade),
+  faithful / no-behavior-change; terminal UI → `ProgressSink`. Effect hardening
+  at the HTTP boundary (`http.ts`): RateLimiter + retry (exp backoff + jitter) +
+  typed errors; inline pacing sleeps removed. Fixed a pre-existing N+1 in
+  `loadCheapestGames` (batched via `inArray`).
+- **`@psg/db`** — Drizzle over **Postgres**: `postgres-js` when
+  `DATABASE_URL=postgres://…`, else embedded **pglite**. Migrations run on engine
+  boot. Tables: `User(steamId)`, `Account`, `Job`, `App`, `BundleApp`,
+  `ActivatedKey`.
+- **Phase 3 — Auth (re-architected to Steam-QR-only).** Identity = the Steam
+  account you QR-log-in with (`User.steamId`). Refresh tokens envelope-encrypted
+  with a **server master key** (`ENCRYPTION_KEY`; insecure dev fallback) via
+  `@psg/crypto` (AES-256-GCM). `QrLoginManager` + `/auth/qr/start`,
+  `/auth/qr/:qrId`, `/auth/logout`; signed-in scan connects another account.
+  Multi-user (accounts scoped by `userId`).
+- **Phase 4 — Jobs + API.** `JobQueue` (global concurrency cap + per-account lock
+  + FIFO queue-and-wait + cancel), `ProgressHub` + `StreamingProgressSink`,
+  `JobService`. HttpRouter routes for accounts (list, refresh) + jobs (start,
+  list, get, cancel). Live progress over **WebSocket** (`ws`, dedicated port).
+  Per-account cached wallet / owned-count / avatar via a `refresh` job.
+- **Phase 5 — Web.** TanStack Start + StyleX + TanStack Query; Vite dev proxy for
+  same-origin cookies. Editorial design (monochrome + lime, list-not-cards, big
+  type). Custom StyleX kit + custom portal `Select`/`Modal`. Screens: QR login,
+  dashboard (account rows, avatar, stats, auto-refresh, connect-via-QR modal),
+  flow launcher (segmented tabs + conditional fields + chips + live summary),
+  live job console, 404.
+- **Testing.** Vitest + `@effect/vitest` (pinned 3.2.x), root config auto-discovers
+  `*.test.ts`. 13 tests (crypto, queue, http-retry via TestClock).
+- **Stability.** Per-job crash isolation (unhandled-rejection/exception net),
+  refresh-token JWT pre-validation, 30s login timeout, `dispose()` logs the
+  client off + shuts the trade-manager down (fixed a Steam-connection leak that
+  caused exit-137 crashes), graceful SIGTERM/SIGINT shutdown.
+
+### Deviations from the original plan
+
+- **DB is Postgres, not Turso/libSQL** (concurrent writes, DB-backed queue
+  locking, `LISTEN/NOTIFY` at scale; pglite gives zero-setup dev).
+- **Auth is Steam-QR-only, not password zero-knowledge.** Consequence: tokens are
+  protected by a *server* master key, not a password-derived KEK — safe if the DB
+  leaks, but **not** zero-knowledge. Argon2 dropped.
+- **Progress transport is WebSocket, not SSE** (SSE never shipped).
+- **UI uses custom StyleX components, not Base UI** (installed but unused; its rc
+  data-state styling fought StyleX — revisit for a11y).
+- **No DB repository wrapper layer** — call sites use `db` (Drizzle) directly.
+- The reference inquirer CLI was **deleted at parity**; its plaintext token
+  columns were dropped.
+
+### Missing / TODO
+
+- **evlog** — adopt the wide-event structured logger in the engine (replace
+  `console.*` + ad-hoc request logging). Requested, not started.
+- **Phase 6 — Deploy.** Engine container; managed Postgres (e.g. Neon) + set
+  `ENCRYPTION_KEY`; Sentry on `SsrParseError` (loud on Valve UI drift).
+- **Live-Steam verification of non-buy flows.** buy uses the saved config;
+  sell/gems/cleanup/redeem/activate build the right shape but haven't been run
+  end-to-end against a real token. Also `getMarketListings` selector parity (§11).
+- **Real browser QA.** The QR-scan → connect → run-flow → live-progress loop is
+  verified at the API/WS level, not click-tested with an actual Steam scan.
+- **Multi-instance scale (later).** In-memory session store + queue lock + hub are
+  single-instance; move to DB/Redis + `SELECT … FOR UPDATE SKIP LOCKED` /
+  `LISTEN/NOTIFY` before running replicas.
